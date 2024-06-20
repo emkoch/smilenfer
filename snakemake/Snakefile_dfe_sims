@@ -1,0 +1,319 @@
+import os
+import pickle
+import smilenfer.dfe as dfe
+import smilenfer.statistics as smile_stats
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+
+out_dir = config["out_dir"]
+WF_dir = config["WF_dir"]
+grid_size_1d = int(config["grid_size_1d"])
+grid_size_2d = int(config["grid_size_2d"])
+grid_size_Ip = int(config["grid_size_Ip"])
+grid_size_I2 = int(config["grid_size_I2"])
+grid_size_nn = int(config["grid_size_nn"])
+pi_size = 10
+
+# Read in WF pile
+WF_pile = {}
+WF_pile["sfs_grid"] = np.load(os.path.join(WF_dir, "SFS_pile.npy"))
+WF_pile["interp_x"] = np.load(os.path.join(WF_dir, "x_set.npy"))
+WF_pile["s_set"]    = np.load(os.path.join(WF_dir, "s_set.npy"))
+WF_pile["s_ud_set"] = np.load(os.path.join(WF_dir, "s_ud_set.npy"))
+WF_pile["tenn_N"]   = np.load(os.path.join(WF_dir, "tenn_N.npy"))
+
+Ne = int(config["Ne"])
+min_x = float(config["min_x"])
+
+batch_size = int(config["batch_size"])
+max_points = int(config["max_points"])
+n_reps = int(config["n_reps"])
+min_cutoff = float(config["min_cutoff"])
+max_cutoff = float(config["max_cutoff"])
+n_cutoffs = int(config["n_cutoffs"])
+cutoffs = np.linspace(min_cutoff, max_cutoff, n_cutoffs)
+n_x = int(config["n_x"])
+
+def get_info(fname):
+    '''
+    Get the parameter combination and replicate number from a file name
+
+    :param fname: file name
+    :return: parameter combination, replicate number
+    '''
+    rep = int(fname.split("_")[-1][:-4])
+    param_combo = int(fname.split("_")[-2])
+    return param_combo, rep
+
+def make_ML_table(llhood_nonplei, llhood_plei, llhood_plei_ssd, fname_ML_table, wildcards, beta_type="hat"):
+    result = {"model":[], "beta":[], "cut":[], "rep":[],
+              "ll_neut":[],
+              "I2_stab":[], "ll_stab":[],
+              "Ip_plei":[], "ll_plei":[],
+              "Ip_plei_ssd":[], "ll_plei_ssd":[]}
+
+    for ii, ll_fname in enumerate(llhood_nonplei):
+        cut, rep = get_info(ll_fname)
+        cut_p, rep_p = get_info(llhood_plei[ii])
+        cut_p_ssd, rep_p_ssd = get_info(llhood_plei_ssd[ii])
+        assert (cut == cut_p) & (rep == rep_p), "Lists don't have same order"
+        assert (cut == cut_p_ssd) & (rep == rep_p_ssd), "Lists don't have same order"
+        cut = cutoffs[cut]
+
+        with open(ll_fname, "rb") as f:
+            ll_np = pickle.load(f)
+        with open(llhood_plei[ii], "rb") as f:
+            ll_p = pickle.load(f)
+        with open(llhood_plei_ssd[ii], "rb") as f:
+            ll_p_ssd = pickle.load(f)
+
+        # Remove the nan in ll_p_ssd["llhood_plei_db"]
+        ll_p_ssd["llhood_plei_db"][np.isnan(ll_p_ssd["llhood_plei_db"])] = -np.inf
+        
+        ml_nonplei = smile_stats.llhood_to_maximums_db(ll_np, simple=True)
+        ml_plei = smile_stats.llhood_to_maximums_plei_db(ll_p, simple=True)
+        ml_plei_ssd = smile_stats.llhood_to_maximums_plei_db(ll_p_ssd, simple=True)
+
+        result["model"].append(wildcards.model)
+        result["beta"].append(beta_type)
+        result["cut"].append(cut)
+        result["rep"].append(rep)
+
+        result["ll_neut"].append(np.round(ml_nonplei["ll_ml_neut_db"], 2))
+        result["I2_stab"].append(np.round(ml_nonplei["I2_ml_stab_db"], 5))
+        result["ll_stab"].append(np.round(ml_nonplei["ll_ml_stab_db"], 2))
+        result["Ip_plei"].append(np.round(ml_plei["Ip_ml_plei_db"], 5))
+        result["ll_plei"].append(np.round(ml_plei["ll_ml_plei_db"], 2))
+        result["Ip_plei_ssd"].append(np.round(ml_plei_ssd["Ip_ml_plei_db"], 5))
+        result["ll_plei_ssd"].append(np.round(ml_plei_ssd["ll_ml_plei_db"], 2))
+    
+    pd.DataFrame(result).to_csv(fname_ML_table, sep="\t", index=None)
+
+models = ["plei", "stab"]
+sfs = ["eq", "WF"]
+rule all:
+    input:
+        # Add ML table
+        expand(os.path.join(out_dir, "ML_table_no_ascertainment", 
+                            "ML_table_no_asc_{model}_{sfs}.tsv"), 
+                            model=models, sfs=sfs),
+        # Add ML table with ascertainment
+        expand(os.path.join(out_dir, "ML_table_ascertainment", 
+                            "ML_table_asc_{model}_{sfs}.tsv"), 
+                            model=models, sfs=sfs)
+
+rule sample_no_ascertainment:
+    output:
+        samp = os.path.join(out_dir, "sample_no_ascertainment", 
+                            "sample_no_asc_{model}_{sfs}_{cut}_{rep}.csv")
+    run:
+        plei = wildcards.model == "plei"
+        WF_pile_use = WF_pile if wildcards.sfs=="WF" else None
+        gwas_x, gwas_s, gwas_b = dfe.simons_gwas_sample(nn=max_points,
+                                                        v_cutoff=cutoffs[int(wildcards.cut)],
+                                                        plei=plei,
+                                                        batch_size=batch_size,
+                                                        Ne=Ne,
+                                                        min_x=min_x,
+                                                        n_x=n_x,
+                                                        WF_pile=WF_pile_use)
+        # Convert x to risk allele frequency
+        gwas_x = np.where(gwas_b > 0, gwas_x, 1 - gwas_x)
+        gwas_df = pd.DataFrame({"x": gwas_x, "s": gwas_s, "b": np.abs(gwas_b)})
+        # Save the sample data to output.samp
+        gwas_df.to_csv(output.samp, index=False)
+
+rule sample_ascertainment:
+    output:
+        samp = os.path.join(out_dir, "sample_ascertainment", 
+                            "sample_asc_{model}_{sfs}_{cut}_{rep}.csv")
+    run:
+        plei = wildcards.model == "plei"
+        WF_pile_use = WF_pile if wildcards.sfs=="WF" else None
+        gwas_x, gwas_s, gwas_b, gwas_b_hat = dfe.simons_gwas_sample(nn=max_points,
+                                                                    v_cutoff=cutoffs[int(wildcards.cut)],
+                                                                    plei=plei,
+                                                                    batch_size=batch_size,
+                                                                    Ne=Ne,
+                                                                    min_x=min_x,
+                                                                    n_x=n_x,
+                                                                    WF_pile=WF_pile_use,
+                                                                    gwas_noise=True,
+                                                                    pp=5e-08)
+        # Convert x to risk allele frequency, allow for extremely remote possibility that gwas noise flips the sign
+        gwas_x = np.where(gwas_b_hat > 0, gwas_x, 1 - gwas_x)
+        gwas_df = pd.DataFrame({"x": gwas_x, "s": gwas_s, "b": np.abs(gwas_b), "b_hat": np.abs(gwas_b_hat)})
+        # Save the sample data to output.samp
+        gwas_df.to_csv(output.samp, index=False)
+
+rule llhood_grid_no_ascertainment:
+    input:
+        samp = os.path.join(out_dir, "sample_no_ascertainment", 
+                            "sample_no_asc_{model}_{sfs}_{cut}_{rep}.csv")
+    output:
+        llhood_nonplei = os.path.join(out_dir, "llhood_no_ascertainment", 
+                                      "llhood_nonplei_no_asc_{model}_{sfs}_{cut}_{rep}.pkl"),
+        llhood_plei = os.path.join(out_dir, "llhood_no_ascertainment", 
+                                   "llhood_plei_no_asc_{model}_{sfs}_{cut}_{rep}.pkl")
+    run:
+        # Read in the sample data
+        gwas_df = pd.read_csv(input.samp)
+        gwas_x = gwas_df["x"].to_numpy()
+        gwas_b = gwas_df["b"].to_numpy()
+        v_cutoff = cutoffs[int(wildcards.cut)]
+
+        WF_pile_use = WF_pile if wildcards.sfs=="WF" else None
+
+        print("Fitting nonplei")
+        llhood_nonplei = smile_stats.llhood_all_db(gwas_x, gwas_b, v_cutoff, Ne, 
+                                                      grid_size_1d, grid_size_2d, pi_size,
+                                                      min_x=min_x, simple=True, neut_db=True, stab_db=True,
+                                                      WF_pile=WF_pile_use, n_x=1000)
+        print("Fitting plei")
+        llhood_plei = smile_stats.llhood_plei(gwas_x, gwas_b, v_cutoff, Ne, 
+                                                 grid_size_Ip, grid_size_I2, grid_size_nn, pi_size,
+                                                 min_x=min_x, simple=True, stab_db=True, 
+                                                 WF_pile=WF_pile_use, n_x=1000, n_s=1000)
+
+        # Save the likelihoods to output using pickle
+        with open(output.llhood_nonplei, "wb") as f:
+            pickle.dump(llhood_nonplei, f)
+        with open(output.llhood_plei, "wb") as f:
+            pickle.dump(llhood_plei, f)
+
+rule llhood_grid_ascertainment:
+    input:
+        samp = os.path.join(out_dir, "sample_ascertainment", 
+                            "sample_asc_{model}_{sfs}_{cut}_{rep}.csv")
+    output:
+        llhood_nonplei = os.path.join(out_dir, "llhood_ascertainment", 
+                                      "llhood_nonplei_asc_{model}_{sfs}_{cut}_{rep}.pkl"),
+        llhood_plei = os.path.join(out_dir, "llhood_ascertainment", 
+                                   "llhood_plei_asc_{model}_{sfs}_{cut}_{rep}.pkl")
+    run:
+        # Read in the sample data
+        gwas_df = pd.read_csv(input.samp)
+        gwas_x = gwas_df["x"].to_numpy()
+        gwas_b_hat = gwas_df["b_hat"].to_numpy()
+        v_cutoff = cutoffs[int(wildcards.cut)]
+
+        WF_pile_use = WF_pile if wildcards.sfs=="WF" else None
+
+        print("Fitting nonplei")
+        llhood_nonplei = smile_stats.llhood_all_db(gwas_x, gwas_b_hat, v_cutoff, Ne, 
+                                                      grid_size_1d, grid_size_2d, pi_size,
+                                                      min_x=min_x, simple=True, neut_db=True, stab_db=True,
+                                                      WF_pile=WF_pile_use, n_x=1000)
+        print("Fitting plei")
+        llhood_plei = smile_stats.llhood_plei(gwas_x, gwas_b_hat, v_cutoff, Ne, 
+                                                 grid_size_Ip, grid_size_I2, grid_size_nn, pi_size,
+                                                 min_x=min_x, simple=True, stab_db=True, 
+                                                 WF_pile=WF_pile_use, n_x=1000, n_s=1000)
+
+        # Save the likelihoods to output using pickle
+        with open(output.llhood_nonplei, "wb") as f:
+            pickle.dump(llhood_nonplei, f)
+        with open(output.llhood_plei, "wb") as f:
+            pickle.dump(llhood_plei, f)
+
+rule llhood_grid_no_ascertainment_ssd:
+    input:
+        samp = os.path.join(out_dir, "sample_no_ascertainment", 
+                            "sample_no_asc_{model}_{sfs}_{cut}_{rep}.csv")
+    output:
+        llhood_plei = os.path.join(out_dir, "llhood_no_ascertainment", 
+                                   "llhood_plei_ssd_no_asc_{model}_{sfs}_{cut}_{rep}.pkl")
+    run:
+        # Read in the sample data
+        gwas_df = pd.read_csv(input.samp)
+        gwas_x = gwas_df["x"].to_numpy()
+        gwas_b = gwas_df["b"].to_numpy()
+        v_cutoff = cutoffs[int(wildcards.cut)]
+
+        WF_pile_use = WF_pile if wildcards.sfs=="WF" else None
+
+        if wildcards.sfs == "WF":
+            Ne = 7310
+        else:
+            Ne = 10000
+        print("Fitting plei")
+        llhood_plei = smile_stats.llhood_plei(gwas_x, gwas_b, v_cutoff, Ne, 
+                                                 grid_size_Ip, grid_size_I2, grid_size_nn, pi_size,
+                                                 min_x=min_x, simple=True, stab_db=True, 
+                                                 WF_pile=WF_pile_use, n_x=1000, n_s=1000, ssd=True)
+
+        # Save the likelihoods to output using pickle
+        with open(output.llhood_plei, "wb") as f:
+            pickle.dump(llhood_plei, f)
+
+rule llhood_grid_ascertainment_ssd:
+    input:
+        samp = os.path.join(out_dir, "sample_ascertainment", 
+                            "sample_asc_{model}_{sfs}_{cut}_{rep}.csv")
+    output:
+        llhood_plei = os.path.join(out_dir, "llhood_ascertainment", 
+                                   "llhood_plei_ssd_asc_{model}_{sfs}_{cut}_{rep}.pkl")
+    run:
+        # Read in the sample data
+        gwas_df = pd.read_csv(input.samp)
+        gwas_x = gwas_df["x"].to_numpy()
+        gwas_b_hat = gwas_df["b_hat"].to_numpy()
+        v_cutoff = cutoffs[int(wildcards.cut)]
+
+        WF_pile_use = WF_pile if wildcards.sfs=="WF" else None
+
+        if wildcards.sfs == "WF":
+            Ne = 7310
+        else:
+            Ne = 10000
+        print("Fitting plei")
+        llhood_plei = smile_stats.llhood_plei(gwas_x, gwas_b_hat, v_cutoff, Ne, 
+                                                 grid_size_Ip, grid_size_I2, grid_size_nn, pi_size,
+                                                 min_x=min_x, simple=True, stab_db=True, 
+                                                 WF_pile=WF_pile_use, n_x=1000, n_s=1000, ssd=True)
+
+        # Save the likelihoods to output using pickle
+        with open(output.llhood_plei, "wb") as f:
+            pickle.dump(llhood_plei, f)
+
+rule ML_table_no_ascertainment:
+    input:
+        llhood_nonplei = [os.path.join(out_dir, "llhood_no_ascertainment", 
+                                      "llhood_nonplei_no_asc_{model}_{sfs}_" + str(cut) + 
+                                       "_" + str(rep) + ".pkl")
+                                      for cut in range(n_cutoffs) for rep in range(n_reps)],
+        llhood_plei = [os.path.join(out_dir, "llhood_no_ascertainment",
+                                    "llhood_plei_no_asc_{model}_{sfs}_" + str(cut) + 
+                                    "_" + str(rep) + ".pkl")
+                                    for cut in range(n_cutoffs) for rep in range(n_reps)],
+        llhood_plei_ssd = [os.path.join(out_dir, "llhood_no_ascertainment", 
+                           "llhood_plei_ssd_no_asc_{model}_{sfs}_" + str(cut) +  "_" + str(rep) + ".pkl")
+                                    for cut in range(n_cutoffs) for rep in range(n_reps)]
+    output:
+        ML_table = os.path.join(out_dir, "ML_table_no_ascertainment", 
+                                "ML_table_no_asc_{model}_{sfs}.tsv")
+    run:
+        make_ML_table(input.llhood_nonplei, input.llhood_plei, input.llhood_plei_ssd, 
+                      output.ML_table, wildcards, beta_type=True)
+
+rule ML_table_ascertainment:
+    input:
+        llhood_nonplei = [os.path.join(out_dir, "llhood_ascertainment", 
+                                      "llhood_nonplei_asc_{model}_{sfs}_" + str(cut) + 
+                                       "_" + str(rep) + ".pkl")
+                                      for cut in range(n_cutoffs) for rep in range(n_reps)],
+        llhood_plei = [os.path.join(out_dir, "llhood_ascertainment",
+                                    "llhood_plei_asc_{model}_{sfs}_" + str(cut) + 
+                                    "_" + str(rep) + ".pkl")
+                                    for cut in range(n_cutoffs) for rep in range(n_reps)],
+        llhood_plei_ssd = [os.path.join(out_dir, "llhood_ascertainment",
+                                    "llhood_plei_ssd_asc_{model}_{sfs}_" + str(cut) + 
+                                    "_" + str(rep) + ".pkl")
+                                    for cut in range(n_cutoffs) for rep in range(n_reps)]
+    output:
+        ML_table = os.path.join(out_dir, "ML_table_ascertainment", 
+                                "ML_table_asc_{model}_{sfs}.tsv")
+    run:
+        make_ML_table(input.llhood_nonplei, input.llhood_plei, input.llhood_plei_ssd, 
+                      output.ML_table, wildcards, beta_type=True)

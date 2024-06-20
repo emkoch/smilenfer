@@ -1,0 +1,17 @@
+---
+out_dir: "output"
+WF_dir: "../../data/WF_pile"
+grid_size_1d: 500
+grid_size_2d: 100
+grid_size_Ip: 500
+grid_size_I2: 100
+grid_size_nn: 20
+Ne: 10000
+min_x: 0.01
+batch_size: 20000
+max_points: 100
+n_reps: 2
+min_cutoff: 0.1
+max_cutoff: 4
+n_cutoffs: 10
+n_x: 1000

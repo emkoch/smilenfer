@@ -1,0 +1,80 @@
+## Evan M Koch
+## Uses WF transition matrix to calculate the SFS under Tennessen et al (2012) demographic model
+
+import smilenfer.simulation_WF as WF
+import smilenfer.statistics as smile_stats
+
+import numpy as np
+
+sys.path.insert(0, config["smilenfer_path"])
+
+out_dir = config["out_dir"]
+scratch_dir = config["scratch_dir"]
+kk = config["Ne_rescale"]
+
+# Get log-spaced S and S_ud, choose s (little) based on the starting Ne
+num_S = config["num_S"]
+num_S_ud = config["num_S_ud"]
+S_max = config["S_max"]
+S_ud_max = config["S_ud_max"]
+S_min = config["S_min"]
+S_ud_min = config["S_ud_min"]
+
+S_vals = np.logspace(np.log10(S_min), np.log10(S_max), num_S)
+S_set = np.concatenate((-np.flip(S_vals), [0], S_vals))
+
+S_ud_set = np.concatenate(([0], -np.logspace(np.log10(S_ud_min), np.log10(S_ud_max), num_S_ud)))
+
+tenn_N = WF.tennessen_model(kk=kk)
+
+tenn_N0 = tenn_N[0]
+
+interp_x = smile_stats.adjusted_x_set(float(config["min_x"]),
+                                         float(config["min_z"]),
+                                         int(config["n_points"]))
+
+rule all:
+    input:
+        os.path.join(out_dir, "SFS_pile.npy")
+
+rule make_tennessen_sfs:
+    output:
+        npy = os.path.join(scratch_dir, "sfs_raw", "sfs_raw_S_{S_ii}_S_ud_{S_ud_ii}.npy")
+    run:
+        s = S_set[int(wildcards.S_ii)] / (2*tenn_N[0])
+        s_ud = S_ud_set[int(wildcards.S_ud_ii)] / (2*tenn_N[0])
+        sfs_tenn = WF.evol_wf(tenn_N[0], s, s_ud, tenn_N, 1, max_size=5000)
+        with open(output.npy, "wb") as f:
+            np.save(f, sfs_tenn)
+
+rule sfs_grid_compile:
+    input:
+        raw_sfs_set = expand(os.path.join(scratch_dir, "sfs_raw",
+                                          "sfs_raw_S_{S_ii}_S_ud_{S_ud_ii}.npy"),
+                             S_ii=range(len(S_set)), S_ud_ii=range(len(S_ud_set)))
+    output:
+        sfs_pile = os.path.join(out_dir, "SFS_pile.npy"),
+        interp_x = os.path.join(out_dir, "x_set.npy"),
+        s_set = os.path.join(out_dir, "s_set.npy"),
+        s_ud_set = os.path.join(out_dir, "s_ud_set.npy"),
+        tenn_N = os.path.join(out_dir, "tenn_N.npy")
+    run:
+        sfs_grid = np.zeros((len(S_set), len(S_ud_set), len(interp_x)))
+        for S_ii in range(len(S_set)):
+            for S_ud_ii in range(len(S_ud_set)):
+                sfs = np.load(os.path.join(scratch_dir, "sfs_raw",
+                                           "sfs_raw_S_{S_ii}_S_ud_{S_ud_ii}.npy").format(
+                                               S_ii=S_ii, S_ud_ii=S_ud_ii))
+                freqs = np.arange(1, len(sfs)+1)/len(sfs)
+                sfs_interp = np.interp(interp_x, freqs, sfs)
+                sfs_grid[S_ii, S_ud_ii] = sfs_interp
+        with open(output.sfs_pile, "wb") as f:
+            np.save(f, sfs_grid)
+        with open(output.interp_x, "wb") as f:
+            np.save(f, interp_x)
+        with open(output.s_set, "wb") as f:
+            np.save(f, S_set/(2*tenn_N[0]))
+        with open(output.s_ud_set, "wb") as f:
+            np.save(f, S_ud_set/(2*tenn_N[0]))
+        with open(output.tenn_N, "wb") as f:
+            np.save(f, tenn_N)

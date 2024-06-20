@@ -1,0 +1,629 @@
+import smilenfer.posterior as post
+import smilenfer.statistics as smile_stats
+import smilenfer.prior as prior
+import smilenfer.plotting as splot
+import smilenfer.simulation_WF as WF
+
+import pandas as pd
+import numpy as np
+import scipy.stats as stats
+import datetime
+import os
+import pickle
+import itertools
+
+from copy import deepcopy
+
+def get_all_param_ranges(all_samp_vals, grid_size_1d, grid_size_2d, grid_size_Ip,
+                         grid_size_I2, grid_size_nn, nn_max):
+
+    I1_set_1d, I2_set_1d, _, _, _ = smile_stats.choose_param_range(all_samp_vals, grid_size_1d)
+    I1_set_2d, I2_set_2d, _, _, _ = smile_stats.choose_param_range(all_samp_vals, grid_size_2d)
+
+    _, _, Ip_set, _, _ = smile_stats.choose_param_range(all_samp_vals, grid_size_Ip)
+    _, _, _, I2_set, _ = smile_stats.choose_param_range(all_samp_vals, grid_size_I2, nn_max=nn_max)
+    _, _, _, _, nn_set = smile_stats.choose_param_range(all_samp_vals, grid_size_nn, nn_max=nn_max)
+
+    return I1_set_1d, I2_set_1d, I1_set_2d, I2_set_2d, Ip_set, I2_set, nn_set
+
+def get_all_samp_vals(samp_fnames, cut_rows):
+    all_samp_vals = []
+    for samp_set in samp_fnames:
+        with open(samp_set, "r") as handle:
+            samp_vals_tmp = handle.readlines()
+        samp_vals_tmp = np.abs(np.array([float(bb.strip()) for bb in samp_vals_tmp])[cut_rows])
+        all_samp_vals.append(samp_vals_tmp)
+    all_samp_vals = np.concatenate(all_samp_vals)
+    return all_samp_vals
+
+data_dir = config["data_dir"]
+out_dir = config["out_dir"]
+scratch_dir = config["scratch_dir"]
+trait_files = config["trait_files"]
+
+# TODO: move to config, also not currently used but might fix this part of pipeline
+vep_dir = "/home/emk31/polygenic_selection/data/vep"
+if "vep_dir" in config.keys():
+    vep_dir = config["vep_dir"]
+
+WF_pile_raw = {}
+WF_pile_raw["sfs_grid"] = np.load(config["sfs_grid"])
+WF_pile_raw["interp_x"] = np.load(config["interp_x"])
+WF_pile_raw["s_set"] = np.load(config["s_set"])
+WF_pile_raw["s_ud_set"] = np.load(config["s_ud_set"])
+WF_pile_raw["tenn_N"] = np.load(config["tenn_N"])
+Ne_tenn = WF_pile_raw["tenn_N"][0]
+
+models = config["models"]
+plot_models = config["plot_models"]
+trait_types = config["trait_types"]
+trait_type_abbrevs = config["trait_type_abbrevs"]
+
+def get_beta_label(trait_type):
+    if trait_type == "anthropometric":
+        return r"$\beta$"
+    elif trait_type == "metabolic":
+        return r"$\beta$"
+    elif trait_type == "disease":
+        return r"$OR-1$"
+    return None
+
+beta_labels = {}
+for trait in trait_files.keys():
+    beta_labels[trait] = get_beta_label(trait_types[trait])
+
+betas = ["orig", "ash"]
+beta_columns = {"orig":"rbeta", "ash":"PosteriorMean"}
+se_columns = {"orig":"se", "ash":"PosteriorSD"}
+freq = "raf"
+fit_types = fit=["orig", "ash"]
+beta_columns_fit = {"orig":"rbeta", "ash":"PosteriorMean"}
+fit_plots = ["orig", "ash"]
+pp = "pval" #TODO: check what this is used for and ideally switch to neglog10_pval
+
+p_threshes = [float(p_thresh) for p_thresh in config["p_threshes"]]
+p_cutoffs = {}
+if "p_cutoffs" in config.keys():
+    assert len(config["p_threshes"])==len(config["p_cutoffs"])
+    for ii, p_thresh in enumerate(config["p_threshes"]):
+        p_cutoffs[str(p_thresh)] = float(config["p_cutoffs"][ii])
+else:
+    for ii, p_thresh in enumerate(config["p_threshes"]):
+        p_cutoffs[str(p_thresh)] = np.inf
+
+Ne = float(config["Ne"])
+min_x = config["min_x"]
+min_x_ash = config["min_x_ash"]
+grid_size_1d = config["grid_size_1d"]
+grid_size_2d = config["grid_size_2d"]
+pi_size = config["pi_size"]
+xmin_pi = config["xmin_pi"]
+xmax_pi = config["xmax_pi"]
+grid_size_Ip = config["grid_size_Ip"]
+grid_size_I2 = config["grid_size_I2"]
+grid_size_nn = config["grid_size_nn"]
+nn_max = config["nn_max"]
+traits = config["traits"]
+
+# Whether to also fit a model with a single s value for all mutations
+single_s = bool(config["single_s"]) if "single_s" in config.keys() else False
+
+# Number of top var_exp SNPs to cut
+cut_top = int(config["cut_top"]) if "cut_top" in config.keys() else 0
+
+# Whether to filter out SNPs where there is evidence for multiple causal variants
+cojo_filter = bool(config["cojo_filter"]) if "cojo_filter" in config.keys() else False
+
+# Filters for n_eff relative to the median
+rel_n_eff_min = float(config["rel_n_eff_min"]) if "rel_n_eff_min" in config.keys() else -np.inf
+rel_n_eff_max = float(config["rel_n_eff_max"]) if "rel_n_eff_max" in config.keys() else np.inf
+
+# Whether to use variant-specific n_eff values
+use_n_eff = bool(config["use_n_eff"]) if "use_n_eff" in config.keys() else False
+
+# Get the run name from the config file if it exists, otherwise choose a random one based on the current date and time 
+# along with the cut_top, cojo_filter, and rel_n_eff filters
+run_name = config["run_name"] if "run_name" in config.keys() else "run_" + datetime.datetime.now().strftime("%Y%m%d_%H%M%S") + \
+           "_cut_top_" + str(cut_top) + "_cojo_" + str(cojo_filter) + "_rel_n_eff_" + str(rel_n_eff_min) + "_" + str(rel_n_eff_max)
+print(run_name)
+
+def load_trait_data(trait_file):
+    trait_data = post.read_and_process_trait_data(trait_file, 
+                                                  cojo_filter=cojo_filter, 
+                                                  cut_top=cut_top,
+                                                  rel_n_eff_min=rel_n_eff_min,
+                                                  rel_n_eff_max=rel_n_eff_max)
+    return trait_data
+
+def load_WFP():
+    with open(os.path.join(out_dir, "WF_pile.pkl"), "rb") as f:
+        WF_pile = pickle.load(f)
+    return WF_pile
+
+rule all:
+    input:
+        os.path.join(scratch_dir, "gencode.v19.annotation.gtf.gz"),
+        expand(os.path.join(out_dir, "ML_all_flat_{p_thresh}_new.csv"), p_thresh=p_threshes), # ML ests and ll for all traits and models
+        expand(os.path.join(out_dir, "plots", "raw_view", "{trait}_se.pdf"), trait=traits),
+        expand(os.path.join(out_dir, "plots", "raw_view", "{trait}_smile.pdf"), trait=traits),
+        expand(os.path.join(out_dir, "{trait}_{p_thresh}_cut_points.tsv"), trait=traits, p_thresh=p_threshes),
+        expand(os.path.join(out_dir, "{trait}_nearest_genes.tsv"), trait=traits),
+        expand(os.path.join(out_dir, "{trait}.vep"), trait=traits),
+        expand(os.path.join(out_dir, "plots", "{trait}.{p_thresh}.{model}.{fit}.ML.pdf"),
+               trait=traits,
+               p_thresh=config["p_threshes"],
+               model=plot_models,
+               fit=fit_plots),
+        expand(os.path.join(out_dir, "plots", "AIC.{p_thresh}.{fit}.pdf"),
+               p_thresh=config["p_threshes"],
+               fit=fit_types),
+        #expand(os.path.join(out_dir, "pointwise_llhood", "{trait}.{p_thresh}.{model}.{fit}.ML.npy"),
+        #       trait=traits,
+        #       p_thresh=config["p_threshes"],
+        #       model=["neut"] + plot_models,
+        #       fit=["orig", "ash"]),
+        #[ff.format(model_1=model_1, model_2=model_2) for model_1, model_2 in
+         #itertools.combinations(["neut"] + plot_models, 2)
+         #for ff in expand(os.path.join(out_dir, "plots", "pointwise_plots",
+         #                              "{trait}.{p_thresh}.{model_1}.{model_2}.{fit}.ML.pdf"),
+         #                 trait=traits,
+         #                 model_1="{model_1}", model_2="{model_2}",
+         #                 p_thresh=config["p_threshes"],
+         #                 fit=fit_types)]
+
+rule download_gencode:
+    output:
+        gencode = os.path.join(scratch_dir, "gencode.v19.annotation.gtf.gz")
+    run:
+        import urllib.request
+        url = "ftp://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_19/gencode.v19.annotation.gtf.gz"
+        urllib.request.urlretrieve(url, output.gencode)
+
+rule to_vep:
+    input:
+        data = lambda wildcards: os.path.join(data_dir, config["trait_files"][wildcards.trait])
+    output:
+        vep = os.path.join(out_dir, "{trait}.vep")
+    run:
+        trait_data = load_trait_data(input.data)
+        chromosomes = trait_data.chr.to_numpy()
+        positions = trait_data.pos.to_numpy()
+        A1 = trait_data.A1.to_numpy(dtype=str)
+        A2 = trait_data.A2.to_numpy(dtype=str)
+        splot.to_vep(output.vep, chromosomes, positions, A1, A2)
+
+rule nearest_genes:
+    input:
+        gencode = os.path.join(scratch_dir, "gencode.v19.annotation.gtf.gz"),
+        data = lambda wildcards: os.path.join(data_dir, config["trait_files"][wildcards.trait])
+    output:
+        nearest_genes = os.path.join(out_dir, "{trait}_nearest_genes.tsv")
+    run:
+        trait_data = load_trait_data(input.data)
+        chromosomes = np.core.defchararray.add("chr", trait_data.chr.to_numpy(dtype=str))
+        positions = trait_data.pos.to_numpy()
+        genes, distances, in_exon = splot.get_nearest_protein_coding_gene(input.gencode, chromosomes, positions)
+        genes_tr, distances_tr, in_exon_tr = splot.get_nearest_protein_coding_gene(input.gencode, chromosomes,
+                                                                                   positions, use_start=False)
+        result = pd.DataFrame({'chr':trait_data.chr.to_numpy(),
+                              'pos':trait_data.pos.to_numpy(),
+                              'nearest_gene':genes,
+                              'distances':distances,
+                               'in_exon':in_exon,
+                               'nearest_gene_tr':genes_tr,
+                               'distances_tr':distances_tr,
+                               'in_exon_tr':in_exon_tr})
+        result.to_csv(output.nearest_genes, index=False, header=True, sep="\t")
+
+rule truncate_pile:
+    output:
+        WF_pile = os.path.join(out_dir, "WF_pile.pkl")
+    run:
+        truncation_size = config["truncation_size"]
+        truncation_freqs = WF.truncate_sfs_vals(WF_pile_raw, 1, WF.tennessen_model()[0], 2e-8, truncation_size)
+        WF_pile = WF.zero_sfs_grid(WF_pile_raw, truncation_freqs)
+        with open(output.WF_pile, "wb") as handle:
+            pickle.dump(WF_pile, handle)
+
+rule plot_se_raf:
+    input:
+        data = lambda wildcards: os.path.join(data_dir, config["trait_files"][wildcards.trait])
+    output:
+        plot = os.path.join(out_dir, "plots", "raw_view", "{trait}_se.pdf")
+    run:
+        trait_data = load_trait_data(input.data)
+        fig, ax = splot.plot_se_raf(trait_data.raf, trait_data.se, trait_name=wildcards.trait)
+        fig.savefig(output.plot, bbox_inches="tight")
+
+rule plot_smile:
+    input:
+        data = lambda wildcards: os.path.join(data_dir, config["trait_files"][wildcards.trait])
+    output:
+        plot = os.path.join(out_dir, "plots", "raw_view", "{trait}_smile.pdf"),
+        plot_ash = os.path.join(out_dir, "plots", "raw_view", "{trait}_smile_ash.pdf"),
+        plot_neff = os.path.join(out_dir, "plots", "raw_view", "{trait}_neff.pdf")
+    run:
+        trait_data = load_trait_data(input.data)
+        fig, ax = splot.plot_smile(trait_data.raf, np.abs(trait_data[beta_columns["orig"]]),
+                                   trait_data[pp], trait=wildcards.trait)
+        fig.savefig(output.plot, bbox_inches="tight")
+        fig, ax = splot.plot_smile(trait_data.raf, np.abs(trait_data[beta_columns["ash"]]),
+                                   trait_data[pp], trait=wildcards.trait)
+        fig.savefig(output.plot_ash, bbox_inches="tight")
+        fig, axes = splot.plot_vexp_pval(trait_data.var_exp.to_numpy(), trait_data[pp].to_numpy(), trait=wildcards.trait)
+        fig.savefig(output.plot_neff, bbox_inches="tight")
+
+rule cut_points:
+    """
+    Save the set of top SNPs in the trait data that were cut out.
+    """
+    input:
+        data = lambda wildcards: os.path.join(data_dir, config["trait_files"][wildcards.trait]),
+        nearest_genes = os.path.join(out_dir, "{trait}_nearest_genes.tsv")
+    output:
+        cut_points = os.path.join(out_dir, "{trait}_{p_thresh}_cut_points.tsv")
+    run:
+        p_thresh = float(wildcards.p_thresh)
+        trait_data = load_trait_data(input.data)
+        nearest_genes = pd.read_csv(input.nearest_genes, sep="\t")
+        trait_data = pd.merge(trait_data, nearest_genes, on=["chr", "pos"], how="left")
+
+        v_cutoff = smile_stats.calc_cutoffs_new(trait_data.var_exp.to_numpy(), trait_data.pval.to_numpy(), 
+                                                n_eff=trait_data.median_n_eff.to_numpy()[0])[wildcards.p_thresh]
+        cut_rows = np.array(trait_data.var_exp > v_cutoff) & np.array(trait_data.maf >= min_x)
+        cut_rows = cut_rows & np.array(trait_data.pval <= p_cutoffs[wildcards.p_thresh])
+
+        x_data = trait_data[cut_rows].raf.to_numpy()
+        beta_data = trait_data[cut_rows].rbeta.to_numpy()
+
+        if cut_top < 1:
+            with open(output.cut_points, "w") as ff:
+                ff.write("")
+        if cut_top > 0:
+            v_set = 2*beta_data**2*x_data*(1-x_data)
+            v_top = np.sort(v_set)[-cut_top]
+            keep_top = v_set >= v_top
+            trait_data[cut_rows][keep_top].to_csv(output.cut_points, sep="\t", index=False, header=True)
+
+rule llhood_calc:
+    input:
+        data = lambda wildcards: os.path.join(data_dir, config["trait_files"][wildcards.trait]),
+        WF_pile = os.path.join(out_dir, "WF_pile.pkl")
+    output:
+        llhood_nonplei = os.path.join(scratch_dir, "{trait}_{beta_type}_{p_thresh}_nonplei.pkl"),
+        llhood_plei = os.path.join(scratch_dir, "{trait}_{beta_type}_{p_thresh}_plei.pkl")
+    run:
+        WF_pile = load_WFP()
+        p_thresh = float(wildcards.p_thresh)
+        trait_data = load_trait_data(input.data)
+        if use_n_eff:
+            v_cutoffs = stats.chi2.ppf(q=1-p_thresh, df=1)/trait_data.n_eff.to_numpy()
+        else:
+            v_cutoff = stats.chi2.ppf(q=1-p_thresh, df=1)/trait_data.median_n_eff[0]
+            cut_rows = np.array(trait_data.var_exp > v_cutoff) & np.array(trait_data.maf >= min_x)
+            cut_rows = cut_rows & np.array(trait_data.pval <= p_cutoffs[wildcards.p_thresh])
+
+        x_data = trait_data[cut_rows].raf.to_numpy()
+        beta_data = trait_data[cut_rows].rbeta.to_numpy()
+
+        if cut_top>0:
+            v_set = 2*beta_data**2*x_data*(1-x_data)
+            v_top = np.sort(v_set)[-cut_top]
+            cut_rows[cut_rows] = v_set < v_top
+            x_data = trait_data[cut_rows].raf.to_numpy()
+
+        if wildcards.beta_type == "orig":
+            beta_data = trait_data[cut_rows].rbeta.to_numpy()
+            llhood_nonplei = smile_stats.llhood_all_db(x_data, beta_data, v_cutoff, Ne, grid_size_1d, grid_size_2d,
+                                                          pi_size, min_x=min_x, simple=False,
+                                                          neut_db=True, stab_db=True, WF_pile=WF_pile, single_s=single_s)
+            llhood_plei = smile_stats.llhood_plei(x_data, beta_data, v_cutoff, Ne, grid_size_Ip, grid_size_I2,
+                                                     grid_size_nn, pi_size, nn_max=nn_max, min_x=min_x, simple=False, stab_db=True,
+                                                     WF_pile=WF_pile)
+        else:
+            beta_obs = trait_data[cut_rows].rbeta.to_numpy()
+            beta_data = trait_data[cut_rows].PosteriorMean.to_numpy()
+            llhood_nonplei = smile_stats.llhood_all_db(x_data, beta_data, v_cutoff, Ne, grid_size_1d, grid_size_2d,
+                                                          pi_size, min_x=min_x, beta_obs=beta_obs,
+                                                          simple=False, neut_db=True, stab_db=True,
+                                                          WF_pile=WF_pile, single_s=single_s)
+            llhood_plei = smile_stats.llhood_plei(x_data, beta_data, v_cutoff, Ne, grid_size_Ip, grid_size_I2,
+                                                     grid_size_nn, pi_size, nn_max=nn_max, min_x=min_x,
+                                                     beta_obs=beta_obs, simple=False, stab_db=True,
+                                                     WF_pile=WF_pile)
+
+        with open(output.llhood_nonplei, "wb") as handle:
+            pickle.dump(llhood_nonplei, handle)
+        with open(output.llhood_plei, "wb") as handle:
+            pickle.dump(llhood_plei, handle)
+
+rule plot_ML:
+    input:
+        ML = os.path.join(out_dir, "ML_all_flat_{p_thresh}_new.csv"),
+        data = lambda wildcards: os.path.join(data_dir, config["trait_files"][wildcards.trait])#,
+        #nearest_genes = os.path.join(out_dir, "{trait}_nearest_genes.tsv")#,
+        # vep = os.path.join(vep_dir, "{trait}.vep")
+    output:
+        plot = os.path.join(out_dir, "plots", "{trait}.{p_thresh}.{model}.{fit}.ML.pdf")#,
+        #gene_plot = os.path.join(out_dir, "plots", "{trait}.{p_thresh}.{model}.{fit}.ML_gene.pdf")
+    run:
+        trait_data = load_trait_data(input.data)
+        p_thresh = float(wildcards.p_thresh)
+        v_cutoff = stats.chi2.ppf(q=1-p_thresh, df=1)/trait_data.median_n_eff[0]
+        cut_rows = np.array(trait_data.var_exp > v_cutoff) & np.array(trait_data.maf >= min_x)
+        cut_rows = cut_rows & np.array(trait_data.pval <= p_cutoffs[wildcards.p_thresh])
+
+        trait_data = trait_data.iloc[cut_rows].reset_index().copy(deep=True)
+        beta_hat = trait_data.rbeta.to_numpy()
+
+        ML = pd.read_csv(input.ML)
+        ML = ML.loc[(ML.trait==wildcards.trait) & (ML.beta==wildcards.fit)]
+
+        if wildcards.fit == "orig":
+            beta_post = None
+        elif wildcards.fit == "ash":
+            beta_post = trait_data.PosteriorMean.to_numpy()
+        else:
+            raise ValueError("Unknown fit type: " + wildcards.fit)
+
+        model = wildcards.model.replace("_db", "")
+        # The starting I_1/I_2 values are scaled by the Ne given in the config
+        # file and not the first entry in the population size trajectory. The
+        # reason for this is that we may rescale the population size trajectory
+        # for efficiency reasons, and we'd like I_1/I_2 estimates to remain
+        # comparable.
+        params = {"Ne":Ne}
+        if model in ["dir", "full"]:
+            params["I1"] = float(ML["I1_" + model])
+        if model in ["stab", "full", "nplei"]:
+            params["I2"] = float(ML["I2_" + model])
+        if model == "plei":
+            params["Ip"] = float(ML["Ip_" + model])
+        if model == "nplei":
+            params["nn"] = float(ML["nn_" + model])
+        fig, ax = splot.sim_plot_truebeta(raf_true=None,
+                                          raf_sim=trait_data.raf.to_numpy(),
+                                          beta_hat=beta_hat,
+                                          beta_post=beta_post,
+                                          model=model,
+                                          params=params,
+                                          incl_raf_true=False,
+                                          title=wildcards.trait + " " + model,
+                                          ylabel=beta_labels[wildcards.trait],
+                                          color_only=True,
+                                          v_cut=v_cutoff)
+        fig.savefig(output.plot, bbox_inches="tight")
+        # nearest_genes = pd.read_csv(input.nearest_genes, sep="\t")
+        # vep = pd.read_csv(input.vep, sep="\t")
+        # vep["chr"] = [int(loc.split(":")[0]) for loc in vep.Location]
+        # vep["pos"] = [int(loc.split("-")[1]) for loc in vep.Location]
+        # consequences = vep.Consequence.to_numpy(dtype=str)
+        # ns_types = ["missense_variant", "stop_gained", "stop_lost", "start_lost"]
+        # plot_consequences = []
+        # for consequence in consequences:
+        #     cc = consequence.split(",")
+        #     cc_use = cc[0]
+        #     for cc_i in cc:
+        #         if cc_i in ns_types:
+        #             cc_use = "nonsynonymous"
+        #     plot_consequences.append(cc_use)
+        # vep["plot_consequence"] = plot_consequences
+        # nearest_genes = pd.merge(nearest_genes, vep, on=["chr", "pos"], how="left")
+        # nearest_genes["plot_distances"] = np.where(nearest_genes.plot_consequence.to_numpy() == "nonsynonymous",
+        #                                            nearest_genes.distances_tr.to_numpy(),
+        #                                            nearest_genes.distances.to_numpy())
+        # trait_data = pd.merge(trait_data, nearest_genes, on=["chr", "pos"], how="left")
+        # ax = splot.add_genes(ax, trait_data.raf.to_numpy(), np.abs(beta_hat),
+        #                      trait_data.nearest_gene.to_numpy(),
+        #                      trait_data.plot_distances.to_numpy(),
+        #                      trait_data.in_exon.to_numpy(),
+        #                      trait_data.plot_consequence.to_numpy(dtype=str))
+        # fig.savefig(output.gene_plot, bbox_inches="tight")
+
+rule ML_all:
+    input:
+        nonsamp_nonplei = [os.path.join(scratch_dir, trait + "_" + beta_type + "_{p_thresh}_nonplei.pkl")
+                           for trait in traits for beta_type in betas],
+        nonsamp_plei = [os.path.join(scratch_dir, trait + "_" + beta_type + "_{p_thresh}_plei.pkl")
+                        for trait in traits for beta_type in betas]
+    output:
+        ML = os.path.join(out_dir, "ML_all_flat_{p_thresh}_new.csv")
+    run:
+        result = {"trait":[], "beta":[],
+                  "ll_neut":[],
+                  "I2_stab":[], "ll_stab":[],
+                  "I1_dir":[], "ll_dir":[],
+                  "I1_full":[], "I2_full":[], "ll_full":[],
+                  "Ip_plei":[], "ll_plei":[],
+                  "I2_nplei":[], "nn_nplei":[], "ll_nplei":[]}
+        if single_s:
+            result["s"] = []
+            result["ll_s"] = []
+        combos = [(trait, beta_type) for trait in traits for beta_type in betas]
+
+        # Grab maximum likelihood values from point estimate models
+        for ii, combo in enumerate(combos):
+            with open(input.nonsamp_nonplei[ii], "rb") as handle:
+                nonplei_llhood = pickle.load(handle)
+            with open(input.nonsamp_plei[ii], "rb") as handle:
+                plei_llhood = pickle.load(handle)
+            ml_nonplei = smile_stats.llhood_to_maximums_db(nonplei_llhood)
+            ml_plei = smile_stats.llhood_to_maximums_plei_db(plei_llhood)
+
+            result["trait"].append(combo[0])
+            result["beta"].append(combo[1])
+
+            result["ll_neut"].append(np.round(ml_nonplei["ll_ml_neut_db"], 2))
+            result["I2_stab"].append(np.round(ml_nonplei["I2_ml_stab_db"], 5))
+            result["ll_stab"].append(np.round(ml_nonplei["ll_ml_stab_db"], 2))
+            result["I1_dir"].append(np.round(ml_nonplei["I1_ml_dir_db"], 5))
+            result["ll_dir"].append(np.round(ml_nonplei["ll_ml_dir_db"], 2))
+            result["I1_full"].append(np.round(ml_nonplei["I1_ml_full_db"], 5))
+            result["I2_full"].append(np.round(ml_nonplei["I2_ml_full_db"], 5))
+            result["ll_full"].append(np.round(ml_nonplei["ll_ml_full_db"], 2))
+            result["Ip_plei"].append(np.round(ml_plei["Ip_ml_plei_db"], 5))
+            result["ll_plei"].append(np.round(ml_plei["ll_ml_plei_db"], 2))
+            result["I2_nplei"].append(np.round(ml_plei["I2_ml_nplei_db"], 5))
+            result["nn_nplei"].append(np.round(ml_plei["nn_ml_nplei_db"], 1))
+            result["ll_nplei"].append(np.round(ml_plei["ll_ml_nplei_db"], 2))
+            if single_s:
+                result["s"].append(np.round(ml_nonplei["s_ml"], 5))
+                result["ll_s"].append(np.round(ml_nonplei["ll_ml_s"], 2))
+
+        result = pd.DataFrame(result)
+        result.to_csv(output.ML, sep=",", index=False)
+
+rule plot_ll_ML:
+    input:
+        data = lambda wildcards: os.path.join(data_dir, config["trait_files"][wildcards.trait]),
+        ll_model_1 = os.path.join(out_dir, "pointwise_llhood", "{trait}.{p_thresh}.{model_1}.{fit}.ML.npy"),
+        ll_model_2 = os.path.join(out_dir, "pointwise_llhood", "{trait}.{p_thresh}.{model_2}.{fit}.ML.npy")
+    output:
+        pointwise_plot = os.path.join(out_dir, "plots", "pointwise_plots",
+                                      "{trait}.{p_thresh}.{model_1}.{model_2}.{fit}.ML.pdf")
+    run:
+        trait_data = load_trait_data(input.data)
+        p_thresh = float(wildcards.p_thresh)
+        v_cutoff = stats.chi2.ppf(q=1-p_thresh, df=1)/trait_data.median_n_eff[0]
+        cut_rows = np.array(trait_data.var_exp > v_cutoff) & np.array(trait_data.maf >= min_x)
+        cut_rows = cut_rows & np.array(trait_data.pval <= p_cutoffs[wildcards.p_thresh])
+
+        trait_data = trait_data.iloc[cut_rows].reset_index().copy(deep=True)
+        beta_hat = trait_data.rbeta.to_numpy()
+
+        pointwise_ll_1 = np.load(input.ll_model_1)
+        pointwise_ll_2 = np.load(input.ll_model_2)
+
+        if wildcards.fit == "orig":
+            beta_post = None
+        elif wildcards.fit == "ash":
+            beta_post = trait_data.PosteriorMean.to_numpy()
+        else:
+            raise ValueError("Unknown fit type: " + wildcards.fit)
+
+        raf = trait_data.raf.to_numpy()
+
+        if np.sum(pointwise_ll_1) > np.sum(pointwise_ll_2):
+            fig, ax = splot.fit_plot_llhood_diff(raf, beta_hat, beta_post,
+                                                 pointwise_ll_1, pointwise_ll_2,
+                                                 model_1=wildcards.model_1.replace("_db", ""),
+                                                 model_2=wildcards.model_2.replace("_db", ""))
+        else:
+            fig, ax = splot.fit_plot_llhood_diff(raf, beta_hat, beta_post,
+                                                 pointwise_ll_2, pointwise_ll_1,
+                                                 model_1=wildcards.model_2.replace("_db", ""),
+                                                 model_2=wildcards.model_1.replace("_db", ""))
+        fig.savefig(output.pointwise_plot, bbox_inches="tight")
+
+rule post_ll_ML:
+    """Calculate the pointwise log likelihood of the data given the maximum likelihood parameters for each model."""
+    input:
+        ML = os.path.join(out_dir, "ML_all_flat_{p_thresh}_new.csv"),
+        data = lambda wildcards: os.path.join(data_dir, config["trait_files"][wildcards.trait]),
+        WF_pile = os.path.join(out_dir, "WF_pile.pkl")
+    output:
+        pointwise_ll = os.path.join(out_dir, "pointwise_llhood", "{trait}.{p_thresh}.{model}.{fit}.ML.npy")
+    run:
+        WF_pile = load_WFP()
+        # This returns beta_hat of the risk (+) allele
+        trait_data = load_trait_data(input.data)
+        p_thresh = float(wildcards.p_thresh)
+        v_cutoff = stats.chi2.ppf(q=1-p_thresh, df=1)/trait_data.median_n_eff[0]
+        cut_rows = np.array(trait_data.var_exp > v_cutoff) & np.array(trait_data.maf >= min_x)
+        cut_rows = cut_rows & np.array(trait_data.pval <= p_cutoffs[wildcards.p_thresh])
+
+        trait_data = trait_data.iloc[cut_rows].reset_index().copy(deep=True)
+        beta_hat = trait_data.rbeta.to_numpy()
+
+        ML = pd.read_csv(input.ML)
+        ML = ML.loc[(ML.trait==wildcards.trait) & (ML.beta==wildcards.fit)]
+
+        if wildcards.fit == "orig":
+            beta_post = None
+        elif wildcards.fit == "ash":
+            beta_post = trait_data.PosteriorMean.to_numpy()
+        else:
+            raise ValueError("Unknown fit type: " + wildcards.fit)
+
+        model = wildcards.model.replace("_db", "")
+        # The starting I_1/I_2 values are scaled by the Ne given in the config
+        # file and not the first entry in the population size trajectory. The
+        # reason for this is that we may rescale the population size trajectory
+        # for efficiency reasons, and we'd like I_1/I_2 estimates to remain
+        # comparable.
+        params = {"Ne":Ne}
+        if model in ["dir", "full"]:
+            params["I1"] = float(ML["I1_" + model])
+        if model in ["stab", "full", "nplei"]:
+            params["I2"] = float(ML["I2_" + model])
+        if model == "plei":
+            params["Ip"] = float(ML["Ip_" + model])
+        if model == "nplei":
+            params["nn"] = float(ML["nn_" + model])
+
+        raf = trait_data.raf.to_numpy()
+
+        if model == "plei":
+            if beta_post is None:
+                pointwise_llhood = smile_stats.llhood_post_plei(raf, beta_hat, v_cutoff, params["Ip"],
+                                                                   params["Ne"], WF_pile=WF_pile)
+            else:
+                pointwise_llhood = smile_stats.llhood_post_plei(raf, beta_post, v_cutoff, params["Ip"],
+                                                                   params["Ne"], beta_obs=beta_hat, WF_pile=WF_pile)
+        elif model == "nplei":
+            if beta_post is None:
+                pointwise_llhood = smile_stats.llhood_post_nplei(raf, beta_hat, v_cutoff, params["I2"], params["nn"],
+                                                                   params["Ne"], WF_pile=WF_pile)
+            else:
+                pointwise_llhood = smile_stats.llhood_post_nplei(raf, beta_post, v_cutoff, params["I2"], params["nn"],
+                                                                   params["Ne"], beta_obs=beta_hat, WF_pile=WF_pile)
+        elif model == "stab":
+            if beta_post is None:
+                pointwise_llhood = smile_stats.llhood_post_ud(raf, beta_hat, v_cutoff, params["I2"],
+                                                                 params["Ne"], WF_pile=WF_pile)
+            else:
+                pointwise_llhood = smile_stats.llhood_post_ud(raf, beta_post, v_cutoff, params["I2"],
+                                                                 params["Ne"], beta_obs=beta_hat, WF_pile=WF_pile)
+        elif model == "dir":
+            if beta_post is None:
+                pointwise_llhood = smile_stats.llhood_post_dir_db(raf, beta_hat, v_cutoff, params["I1"],
+                                                                     params["Ne"], WF_pile=WF_pile)
+            else:
+                pointwise_llhood = smile_stats.llhood_post_dir_db(raf, beta_post, v_cutoff, params["I1"],
+                                                                     params["Ne"], beta_obs=beta_hat, WF_pile=WF_pile)
+        elif model == "full":
+            if beta_post is None:
+                pointwise_llhood = smile_stats.llhood_post_full_db(raf, beta_hat, v_cutoff, params["I1"],
+                                                                      params["I2"],
+                                                                      params["Ne"], WF_pile=WF_pile)
+            else:
+                pointwise_llhood = smile_stats.llhood_post_full_db(raf, beta_post, v_cutoff, params["I1"],
+                                                                      params["I2"],
+                                                                      params["Ne"], beta_obs=beta_hat, WF_pile=WF_pile)
+        elif model == "neut":
+            pointwise_llhood = smile_stats.llhood_post_neut(raf, beta_hat, v_cutoff, params["Ne"], WF_pile=WF_pile)
+
+        with open(output.pointwise_ll, "wb") as f:
+            np.save(f, pointwise_llhood)
+
+rule plot_AIC:
+    input:
+        ML = os.path.join(out_dir, "ML_all_flat_{p_thresh}_new.csv")
+    output:
+        plot = os.path.join(out_dir, "plots", "AIC.{p_thresh}.{fit}.pdf"),
+        log_plot = os.path.join(out_dir, "plots", "AIC.{p_thresh}.{fit}.logy.pdf")
+    run:
+        ML_table = pd.read_csv(input.ML)
+        trait_groups = {}
+        for trait in traits:
+            if trait_types[trait] in trait_groups.keys():
+                trait_groups[trait_types[trait]] += [trait]
+            else:
+                trait_groups[trait_types[trait]] = [trait]
+        trait_group_labels = [trait_type_abbrevs[group] for group in trait_groups.keys()]
+        fig, axes = splot.plot_ML_table(ML_table, trait_groups, trait_group_labels,
+                                            ss=100, fit=wildcards.fit)
+        fig.savefig(output.plot, bbox_inches="tight")
+        fig, axes = splot.plot_ML_table(ML_table, trait_groups, trait_group_labels,
+                                            ss=100, fit=wildcards.fit, logy=True)
+        fig.savefig(output.log_plot, bbox_inches="tight")

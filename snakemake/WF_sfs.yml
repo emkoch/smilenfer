@@ -1,0 +1,14 @@
+---
+out_dir: "output"
+num_S: 3
+num_S_ud: 3
+S_max: 100
+S_ud_max: 100
+S_min: 0.5
+S_ud_min: 0.5
+Ne_rescale: 0.03
+smilenfer_path: "/home/evan/Drive/Work/Sunyaev/POLYGENIC_SELECTION/PROGRAMS/smilenfer"
+scratch_dir: "scratch"
+min_x: 0.01
+min_z: 5
+n_points: 200

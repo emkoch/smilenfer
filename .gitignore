@@ -1,0 +1,4 @@
+*.pyc
+dist
+smilenfer.egg-info
+reinstall.sh

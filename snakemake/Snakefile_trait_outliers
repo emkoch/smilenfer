@@ -1,0 +1,111 @@
+import smilenfer.posterior as post
+import smilenfer.statistics as smile_stats
+import smilenfer.prior as prior
+import smilenfer.plotting as splot
+import smilenfer.simulation_WF as WF
+
+import os
+import pickle
+import numpy as np
+import scipy.optimize as opt
+import scipy.stats as stats
+
+p_thresh_txt = config["p_cutoff"]
+p_thresh = float(p_thresh_txt)
+
+traits = config["traits"]
+
+Ne        = float(config["Ne"])
+min_x     = float(config["min_x"])
+
+data_dir = config["data_dir"]
+out_dir = config["out_dir"]
+trait_files = config["trait_files"]
+penalty_set = config["penalty_set"]
+
+WF_pile_f = config["WF_pile_f"] # Use a precomputed WF pile, should be truncated already
+
+def load_WFP():
+    with open(WF_pile_f, "rb") as f:
+        WF_pile = pickle.load(f)
+    return WF_pile
+
+def get_input_for_penalty(wildcards):
+    penalty = float(wildcards.penalty)
+    if penalty == np.max(penalty_set):
+        return []  # No initialization dependency for highest penalty
+    else:
+        # get the index of the current penalty
+        sorted_penalties = np.sort(penalty_set)[::-1]
+        idx = np.where(sorted_penalties == penalty)[0][0]
+        previous_penalty = sorted_penalties[idx-1]
+        return os.path.join(out_dir, f"posterior_{wildcards.trait}_{previous_penalty}.pkl")
+
+rule all:
+    input:
+        expand(os.path.join(out_dir, "posterior_{trait}_{penalty}.pkl"), trait=traits, penalty=penalty_set)
+
+rule run_outlier_fit:
+    input:
+        data = lambda wildcards: os.path.join(data_dir, config["trait_files"][wildcards.trait]),
+        WF_pile = WF_pile_f,
+        prev_post = get_input_for_penalty
+    output:
+        os.path.join(out_dir, "posterior_{trait}_{penalty}.pkl")
+    run:
+        # read in input.prev_post
+        if len(input.prev_post) > 0:
+            with open(input.prev_post, "rb") as f:
+                prev_post = pickle.load(f)
+            prev_ww = prev_post["all_ww"]
+        else:
+            prev_ww = None
+
+        WF_pile = load_WFP() # loads the WF pile
+        trait_data = post.read_and_process_trait_data(input.data)
+        v_cutoff = stats.chi2.ppf(q=1-p_thresh, df=1)/trait_data.median_n_eff[0]
+        cut_rows = np.array(trait_data.var_exp > v_cutoff) & np.array(trait_data.maf >= min_x)
+        cut_rows = cut_rows & np.array(trait_data.pval <= p_thresh)
+
+        x_data = trait_data[cut_rows].raf.to_numpy()
+        beta_hat = trait_data[cut_rows].rbeta.to_numpy()
+        vv = x_data*(1-x_data)*beta_hat**2
+        # get the indices of the top vv snps
+        top_vv = np.argsort(vv)[::-1][:10]
+        top_beta = np.argsort(np.abs(beta_hat))[::-1][:10]
+        top_vv = np.union1d(top_vv, top_beta)
+        snps = trait_data[cut_rows].snp.to_numpy()
+        penalty = float(wildcards.penalty)
+
+        def neg_ud_llhood_weighted(params, penalty):
+            I2 = params[0]
+            ww = params[1:]
+            beta_shrink = beta_hat.copy()
+            beta_shrink[top_vv] = beta_hat[top_vv]*np.sqrt(ww)
+            result = -np.sum(smile_stats.llhood_post_ud(x_data, beta_shrink, v_cutoff, I2, Ne, 
+                                                        WF_pile=WF_pile, beta_obs=beta_hat, min_x=min_x))
+            if np.isinf(result): # if infinity, return a large number
+                return 1e6*I2 + penalty*np.sum(np.abs(np.log(ww)))
+            else:
+                return result + penalty*np.sum(np.abs(np.log(ww)))
+
+        penalty_llhood = lambda params: neg_ud_llhood_weighted(params, penalty)
+
+        if prev_ww is not None:
+            x0 = np.array([1e-4] + list(prev_ww[top_vv]))
+        else:
+            x0 = np.array([1e-4] + [1]*len(top_vv))
+
+        # np.max(beta_hat)**2 * Ne * I2 < 200
+        I2_max = 10 #400/(np.max(beta_hat)**2 * Ne)
+        print(I2_max)
+        bounds = [(1e-6, I2_max)] + [(1e-3, 1)]*len(top_vv)
+        minimizer_kwargs = {"method": "SLSQP", "bounds": bounds}
+        penalty_fit = opt.basinhopping(penalty_llhood, x0, minimizer_kwargs=minimizer_kwargs, niter=20, disp=True)
+        # penalty_fit = opt.minimize(penalty_llhood, x0=x0, method="SLSQP", bounds=[(1e-6, I2_max)] + [(1e-2, 1)]*len(top_vv))
+        all_ww = np.ones_like(x_data)
+        all_ww[top_vv] = penalty_fit.x[1:]
+        result = {"snps": snps, "x_data": x_data, "beta_hat": beta_hat, "penalty_fit": penalty_fit, "trait": wildcards.trait, 
+                  "penalty": penalty, "all_ww": all_ww}
+        with open(output[0], "wb") as f:
+            pickle.dump(result, f)

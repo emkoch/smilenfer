@@ -1,0 +1,88 @@
+---
+data_dir: "/home/emk31/polygenic_selection/data/noah_ash/COJO/"
+out_dir: "output"
+scratch_dir: "/n/scratch3/users/e/emk31/polygenic_selection/asc_sim_1_neut/"
+sfs_grid: "SFS_pile.npy"
+interp_x: "x_set.npy"
+s_set: "s_set.npy"
+s_ud_set: "s_ud_set.npy"
+tenn_N: "tenn_N.npy"
+trait_files:
+  AD: "ad.5e-5.cojo.normal.no_mhc.tsv"
+  IBD: "ibd.5e-5.cojo.normal.no_mhc.tsv"
+  CD: "cd.5e-5.cojo.normal.no_mhc.tsv"
+  T2D: "t2d.5e-5.cojo.normal.no_mhc.tsv"
+  UC: "uc.5e-5.cojo.normal.no_mhc.tsv"
+ash_files:
+  AD: "ash.ad.normal.block_mhc.maf_0.01.RDS"
+  CAD: "ash.cad.normal.block_mhc.maf_0.01.RDS"
+  Breast_cancer: "ash.breast_cancer.normal.block_mhc.maf_0.01.RDS"
+  BMI: "ash.bmi.normal.block_mhc.maf_0.01.RDS"
+  LDL: "ash.ldl.normal.block_mhc.maf_0.01.RDS"
+  IBD: "ash.ibd.normal.block_mhc.maf_0.01.RDS"
+  HDL: "ash.hdl.normal.block_mhc.maf_0.01.RDS"
+  Diastolic_BP: "ash.diastolic_bp.normal.block_mhc.maf_0.01.RDS"
+  CD: "ash.cd.normal.block_mhc.maf_0.01.RDS"
+  T2D: "ash.t2d_bmiadj.normal.block_mhc.maf_0.01.RDS"
+  Systolic_BP: "ash.systolic_bp.normal.block_mhc.maf_0.01.RDS"
+  SH: "ash.standing_height.normal.block_mhc.maf_0.01.RDS"
+  SCZ: "ash.scz.normal.block_mhc.maf_0.01.RDS"
+  RBC: "ash.rbc_count.normal.block_mhc.maf_0.01.RDS"
+  WBC: "ash.wbc_count.normal.block_mhc.maf_0.01.RDS"
+  Urate: "ash.urate.normal.block_mhc.maf_0.01.RDS"
+  UC: "ash.uc.normal.block_mhc.maf_0.01.RDS"
+  Triglycerides: "ash.triglycerides.normal.block_mhc.maf_0.01.RDS"
+trait_types:
+  AD: "disease"
+  CAD: "disease"
+  Breast_cancer: "disease"
+  BMI: "anthropometric"
+  LDL: "metabolic"
+  IBD: "disease"
+  HDL: "metabolic"
+  Diastolic_BP: "metabolic"
+  CD: "disease"
+  T2D: "disease"
+  Systolic_BP: "metabolic"
+  SH: "anthropometric"
+  SCZ: "disease"
+  RBC: "metabolic"
+  WBC: "metabolic"
+  Urate: "metabolic"
+  UC: "disease"
+  Triglycerides: "metabolic"
+trait_type_abbrevs:
+  disease: "Disease"
+  metabolic: "Metabolic"
+  anthropometric: "Anthro"
+traits: ["IBD"]
+neutral: True
+ascertainment: 1
+p_threshes: [1e-08]
+p_thresh_calibrate: 1e-08
+Ne: 1e4
+truncation_size: 30000000
+min_x: 0.01
+min_x_ash: 0.01
+x_grid_size: 4000
+x_grid_size_plei: 4000
+grid_size_1d: 500 #1000
+grid_size_2d: 100 #100
+pi_size: 10 #100
+xmin_pi: 0.001
+xmax_pi: 0.999
+grid_size_Ip: 500 #2000
+grid_size_I2: 100 #200
+grid_size_nn: 20 #20
+nn_max: 20
+# Change these depending on whether median or max is used to choose range
+S_ud_min: 0.1 # 5
+S_ud_max: 100 # 300
+S_dir_min: 0.1 # 1
+S_dir_max: 10 #20
+I1_range_size: 20 
+I2_range_size: 100
+Ip_range_size: 100
+Ip_frac_strong: 0.80
+nsamp: [200]
+nrep: 100

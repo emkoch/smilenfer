@@ -1,0 +1,396 @@
+import smilenfer.posterior as post
+import smilenfer.statistics as smile_stats
+import smilenfer.prior as prior
+import smilenfer.simulation as sim
+import smilenfer.plotting as splot
+import smilenfer.simulation_WF as WF
+
+import pandas as pd
+import numpy as np
+import scipy.stats as stats
+import os
+import pickle
+import csv
+
+import matplotlib.pyplot as plt
+
+data_dir = config["data_dir"]
+out_dir = config["out_dir"]
+scratch_dir = config["scratch_dir"]
+trait_files = config["trait_files"]
+ash_files = config["ash_files"]
+
+eq = int(config["eq"]) if "eq" in config.keys() else False
+use_neff = int(config["use_neff"]) if "use_neff" in config.keys() else False
+asc = int(config["ascertainment"]) if "ascertainment" in config.keys() else True
+table_set = ["table", "table_beta_true", "table_beta_ash"] if asc else ["table"]
+
+WF_pile_raw = {}
+WF_pile_raw["sfs_grid"] = np.load(config["sfs_grid"])
+WF_pile_raw["interp_x"] = np.load(config["interp_x"])
+WF_pile_raw["s_set"] = np.load(config["s_set"])
+WF_pile_raw["s_ud_set"] = np.load(config["s_ud_set"])
+WF_pile_raw["tenn_N"] = np.load(config["tenn_N"])
+Ne_tenn = WF_pile_raw["tenn_N"][0]
+
+#TODO: put these in config file as well
+betas = ["orig", "ash"]
+models = ["dir", "stab", "plei"]
+traits = config["traits"]
+
+p_threshes = config["p_threshes"]
+p_thresh_calibrate = config["p_thresh_calibrate"]
+
+Ne = float(config["Ne"])
+min_x = config["min_x"]
+x_grid_size = int(config["x_grid_size"]) if "x_grid_size" in config.keys() else 200
+x_grid_size_plei = int(config["x_grid_size_plei"]) if "x_grid_size_plei" in config.keys() else 4000
+
+grid_size_1d = config["grid_size_1d"]
+grid_size_2d = config["grid_size_2d"]
+pi_size = config["pi_size"]
+grid_size_Ip = config["grid_size_Ip"]
+grid_size_I2 = config["grid_size_I2"]
+grid_size_nn = config["grid_size_nn"]
+
+S_ud_min = config["S_ud_min"]
+S_ud_max = config["S_ud_max"]
+S_dir_min = config["S_dir_min"]
+S_dir_max = config["S_dir_max"]
+
+if "S_ud_min_grid" in config.keys():
+    S_ud_min_grid = config["S_ud_min_grid"]
+    S_ud_max_grid = config["S_ud_max_grid"]
+    S_dir_min_grid = config["S_dir_min_grid"]
+    S_dir_max_grid = config["S_dir_max_grid"]
+else:
+    S_ud_min_grid = 0.01
+    S_ud_max_grid = 1000
+    S_dir_min_grid = 0.01
+    S_dir_max_grid = 1000
+
+I1_range_size = config["I1_range_size"]
+I2_range_size = config["I2_range_size"]
+Ip_range_size = config["Ip_range_size"]
+Ip_frac_strong = config["Ip_frac_strong"]
+
+neutral = bool(config["neutral"]) if "neutral" in config.keys() else False
+
+nsamps = config["nsamp"]
+nrep = config["nrep"]
+
+if neutral:
+    model_range_sizes = {"dir":1, "stab":1, "plei":1}
+else:
+    model_range_sizes = {"dir":I1_range_size, "stab":I2_range_size, "plei":Ip_range_size}
+
+v_cutoffs = {}
+neff = {}
+for trait in traits:
+    v_cutoffs[trait] = {}
+    trait_data = post.read_trait_data(os.path.join(data_dir, trait_files[trait]), sep=" ", compression=None)
+    neff[trait] = smile_stats.calc_n_eff(trait_data.orig_var_exp, trait_data.orig_p)
+    v_cutoffs_trait = smile_stats.calc_cutoffs_new(trait_data.orig_var_exp, trait_data.orig_p)
+    for p_thresh in list(set(p_threshes + [p_thresh_calibrate])):
+        v_cutoffs[trait][str(p_thresh)] = v_cutoffs_trait[str(p_thresh)]
+
+#TODO: move this function to package
+def generate_ranges(trait_fname, v_cutoff, ref="max"):
+    trait_data = post.read_trait_data(trait_fname, sep=" ", compression=None)
+    trait_data = trait_data[trait_data.orig_var_exp > v_cutoff]
+    beta_hat = np.abs(trait_data.orig_b)
+
+    if ref == "max":
+        beta_ref = np.max(beta_hat)
+    elif ref == "median":
+        beta_ref = np.median(beta_hat)
+    else:
+        assert False, "Not implemented"
+
+    I1_min = S_dir_min / (2*Ne*beta_ref)
+    I1_max = S_dir_max / (2*Ne*beta_ref)
+    I1_range = np.logspace(np.log10(I1_min), np.log10(I1_max), num=I1_range_size, base=10.0)
+
+    I2_min = S_ud_min / (2*Ne*beta_ref**2)
+    I2_max = S_ud_max / (2*Ne*beta_ref**2)
+    I2_range = np.logspace(np.log10(I2_min), np.log10(I2_max), num=I2_range_size, base=10.0)
+
+    Ip_min = S_ud_min / (2*Ne*beta_ref**2)
+    Ip_max = Ip_min
+    # Want to find Ip_max such that much of the distribution for
+    # the maximum beta is strongly selected around the maximum value
+    while sim.levy_cdf(S_ud_max/(2*Ne), Ip_max*beta_ref**2) > (1-Ip_frac_strong):
+        Ip_max = Ip_max * 1.1
+    Ip_range = np.logspace(np.log10(Ip_min), np.log10(Ip_max), num=Ip_range_size, base=10.0)
+
+    return I1_range, I2_range, Ip_range
+
+param_combos = {}
+for trait in traits:
+    param_combos[trait] = {}
+    if neutral:
+        param_combos[trait].update({
+            "dir": np.array([0]),
+            "stab": np.array([0]),
+            "plei": np.array([1e-100])
+        })
+    else:
+        (param_combos[trait]["dir"],
+         param_combos[trait]["stab"],
+         param_combos[trait]["plei"]) = generate_ranges(os.path.join(data_dir, trait_files[trait]),
+                                                        v_cutoffs[trait][str(p_thresh_calibrate)],
+                                                        ref="median")
+
+def load_WFP():
+    with open(os.path.join(out_dir, "WF_pile.pkl"), "rb") as f:
+        WF_pile = pickle.load(f)
+    return WF_pile
+
+rule all:
+    input:
+        expand(os.path.join(out_dir, "ML", "ML_{table}_{trait}_{model}_{p_thresh}_nsamp_{nsamp}.tsv"),
+               table=table_set, trait=traits, model=models, p_thresh=p_threshes, nsamp=nsamps)
+        
+
+rule truncate_pile:
+    output:
+        WF_pile = os.path.join(out_dir, "WF_pile.pkl")
+    run:
+        truncation_size = config["truncation_size"]
+        truncation_freqs = WF.truncate_sfs_vals(WF_pile_raw, 1, WF.tennessen_model()[0], 2e-8, truncation_size)
+        WF_pile = WF.zero_sfs_grid(WF_pile_raw, truncation_freqs)
+        with open(output.WF_pile, "wb") as handle:
+            pickle.dump(WF_pile, handle)
+
+rule sample:
+    input:
+        data = lambda wildcards: os.path.join(data_dir, config["trait_files"][wildcards.trait]),
+        RDS = lambda wildcards: os.path.join(data_dir, config["ash_files"][wildcards.trait]),
+        WF_pile = os.path.join(out_dir, "WF_pile.pkl")
+    output:
+        samp = os.path.join(config["out_dir"], "sample",
+                            "{trait}_{p_thresh}_{model}_param_combo_{param_combo}_nsamp_{nsamp}_rep_{rep}.tsv")
+    run:
+        WF_pile = load_WFP()
+        itersamp=100000
+        if wildcards.model == "dir":
+            I1 = param_combos[wildcards.trait][wildcards.model][int(wildcards.param_combo)]
+            sfs_func = prior.make_sfs_func_dir(I1, Ne, WF_pile)
+        elif wildcards.model == "stab":
+            I2 = param_combos[wildcards.trait][wildcards.model][int(wildcards.param_combo)]
+            sfs_func = prior.make_sfs_func_stab(I2, Ne, WF_pile)
+        elif wildcards.model == "plei":
+            Ip = param_combos[wildcards.trait][wildcards.model][int(wildcards.param_combo)]
+            sfs_func = prior.make_sfs_func_plei_(Ip, Ne, WF_pile, n_s=100)
+            itersamp=1000
+        sample = prior.make_full_sample(input.RDS, WF_pile, int(wildcards.nsamp), sfs_func,
+                                        neff[wildcards.trait], v_cutoffs[wildcards.trait][wildcards.p_thresh],
+                                        itersamp=itersamp, asc=asc)
+        pd.DataFrame({"beta":sample[0], "beta_hat":sample[1],
+                      "raf":sample[2], "se":sample[3]}).to_csv(output.samp, sep="\t", index=False)
+
+
+rule llhood_grid_hat:
+    input:
+        samp = os.path.join(config["out_dir"], "sample", "{trait}_{p_thresh}_{model}_param_combo_{param_combo}_nsamp_{nsamp}_rep_{rep}.tsv"),
+        WF_pile = os.path.join(out_dir, "WF_pile.pkl")
+    output:
+        llhood_nonplei = os.path.join(scratch_dir, "sample",
+                                      "nonplei_{trait}_{p_thresh}_{model}_param_combo_{param_combo}_nsamp_{nsamp}_rep_{rep}.pkl"),
+        llhood_plei = os.path.join(scratch_dir, "sample",
+                                   "plei_{trait}_{p_thresh}_{model}_param_combo_{param_combo}_nsamp_{nsamp}_rep_{rep}.pkl")
+    run:
+        WF_pile = None if eq else load_WFP()
+        sim_data = pd.read_csv(input.samp, sep="\t")
+        v_cutoff = float(v_cutoffs[wildcards.trait][wildcards.p_thresh])
+        xx = sim_data.raf.to_numpy()
+        beta_hat = np.abs(sim_data.beta_hat.to_numpy()) if asc else np.abs(sim_data.beta.to_numpy())
+        neff_trait = neff[wildcards.trait] if use_neff else None
+        llhood_nonplei = smile_stats.llhood_all_db(xx, beta_hat, v_cutoff, Ne, grid_size_1d, grid_size_2d,
+                                                      pi_size, min_x=min_x, simple=True,
+                                                      neut_db=True, stab_db=True, WF_pile=WF_pile,
+                                                      S_dir_max=S_dir_max_grid, S_dir_min=S_dir_min_grid,
+                                                      S_ud_max=S_ud_max_grid, S_ud_min=S_ud_min_grid, neff=neff_trait,
+                                                      n_x=x_grid_size)
+        llhood_plei = smile_stats.llhood_plei(xx, beta_hat, v_cutoff, Ne, grid_size_Ip, grid_size_I2,
+                                                 grid_size_nn, pi_size, min_x=min_x, simple=True,
+                                                 stab_db=True, WF_pile=WF_pile,
+                                                 S_dir_max=S_dir_max_grid, S_dir_min=S_dir_min_grid,
+                                                 S_ud_max=S_ud_max_grid, S_ud_min=S_ud_min_grid, neff=neff_trait,
+                                                 n_x=x_grid_size_plei)
+        with open(output.llhood_nonplei, "wb") as handle:
+            pickle.dump(llhood_nonplei, handle)
+        with open(output.llhood_plei, "wb") as handle:
+            pickle.dump(llhood_plei, handle)
+
+rule llhood_grid_true:
+    input:
+        samp = os.path.join(config["out_dir"], "sample", "{trait}_{p_thresh}_{model}_param_combo_{param_combo}_nsamp_{nsamp}_rep_{rep}.tsv"),
+        WF_pile = os.path.join(out_dir, "WF_pile.pkl")
+    output:
+        llhood_nonplei = os.path.join(scratch_dir, "sample",
+                                      "beta_true_nonplei_{trait}_{p_thresh}_{model}_param_combo_{param_combo}_nsamp_{nsamp}_rep_{rep}.pkl"),
+        llhood_plei = os.path.join(scratch_dir, "sample",
+                                   "beta_true_plei_{trait}_{p_thresh}_{model}_param_combo_{param_combo}_nsamp_{nsamp}_rep_{rep}.pkl")
+    run:
+        WF_pile = None if eq else load_WFP()
+        sim_data = pd.read_csv(input.samp, sep="\t")
+        v_cutoff = float(v_cutoffs[wildcards.trait][wildcards.p_thresh])
+        xx = sim_data.raf.to_numpy()
+        beta_hat = np.abs(sim_data.beta_hat.to_numpy())
+        beta_true = np.abs(sim_data.beta.to_numpy())
+        neff_trait = neff[wildcards.trait] if use_neff else None
+        llhood_nonplei = smile_stats.llhood_all_db(xx, beta_true, v_cutoff, Ne, grid_size_1d, grid_size_2d,
+                                                      pi_size, beta_obs=beta_hat, min_x=min_x, simple=True,
+                                                      neut_db=True, stab_db=True, WF_pile=WF_pile,
+                                                      S_dir_max=S_dir_max_grid, S_dir_min=S_dir_min_grid,
+                                                      S_ud_max=S_ud_max_grid, S_ud_min=S_ud_min_grid, neff=neff_trait,
+                                                      n_x=x_grid_size)
+        llhood_plei = smile_stats.llhood_plei(xx, beta_true, v_cutoff, Ne, grid_size_Ip, grid_size_I2,
+                                                 grid_size_nn, pi_size,
+                                                 beta_obs=beta_hat, min_x=min_x, simple=True, stab_db=True, WF_pile=WF_pile,
+                                                 S_dir_max=S_dir_max_grid, S_dir_min=S_dir_min_grid,
+                                                 S_ud_max=S_ud_max_grid, S_ud_min=S_ud_min_grid, neff=neff_trait,
+                                                 n_x=x_grid_size_plei)
+        with open(output.llhood_nonplei, "wb") as handle:
+            pickle.dump(llhood_nonplei, handle)
+        with open(output.llhood_plei, "wb") as handle:
+            pickle.dump(llhood_plei, handle)
+
+rule llhood_grid_ash:
+    input:
+        samp = os.path.join(config["out_dir"], "sample", "{trait}_{p_thresh}_{model}_param_combo_{param_combo}_nsamp_{nsamp}_rep_{rep}.tsv"),
+        WF_pile = os.path.join(out_dir, "WF_pile.pkl"),
+        RDS = lambda wildcards: os.path.join(data_dir, config["ash_files"][wildcards.trait])
+    output:
+        llhood_nonplei = os.path.join(scratch_dir, "sample",
+                                      "beta_ash_nonplei_{trait}_{p_thresh}_{model}_param_combo_{param_combo}_nsamp_{nsamp}_rep_{rep}.pkl"),
+        llhood_plei = os.path.join(scratch_dir, "sample",
+                                   "beta_ash_plei_{trait}_{p_thresh}_{model}_param_combo_{param_combo}_nsamp_{nsamp}_rep_{rep}.pkl")
+    run:
+        WF_pile = None if eq else load_WFP()
+        sim_data = pd.read_csv(input.samp, sep="\t")
+        v_cutoff = float(v_cutoffs[wildcards.trait][wildcards.p_thresh])
+        xx = sim_data.raf.to_numpy()
+        beta_hat = np.abs(sim_data.beta_hat.to_numpy())
+        se = sim_data.se.to_numpy()
+        beta_ash = prior.run_ashr(beta_hat, se, input.RDS).PosteriorMean.to_numpy()
+        xx = np.where(beta_ash > 0, xx, 1-xx)
+        beta_ash = np.abs(beta_ash)
+        neff_trait = neff[wildcards.trait] if use_neff else None
+        llhood_nonplei = smile_stats.llhood_all_db(xx, beta_ash, v_cutoff, Ne, grid_size_1d, grid_size_2d,
+                                                      pi_size, beta_obs=beta_hat, min_x=min_x, simple=True,
+                                                      neut_db=True, stab_db=True, WF_pile=WF_pile,
+                                                      S_dir_max=S_dir_max_grid, S_dir_min=S_dir_min_grid,
+                                                      S_ud_max=S_ud_max_grid, S_ud_min=S_ud_min_grid, neff=neff_trait,
+                                                      n_x=x_grid_size)
+        llhood_plei = smile_stats.llhood_plei(xx, beta_ash, v_cutoff, Ne, grid_size_Ip, grid_size_I2,
+                                                 grid_size_nn, pi_size,
+                                                 beta_obs=beta_hat, min_x=min_x, simple=True, stab_db=True, WF_pile=WF_pile,
+                                                 S_dir_max=S_dir_max_grid, S_dir_min=S_dir_min_grid,
+                                                 S_ud_max=S_ud_max_grid, S_ud_min=S_ud_min_grid, neff=neff_trait,
+                                                 n_x=x_grid_size_plei)
+        with open(output.llhood_nonplei, "wb") as handle:
+            pickle.dump(llhood_nonplei, handle)
+        with open(output.llhood_plei, "wb") as handle:
+            pickle.dump(llhood_plei, handle)
+
+def get_info(fname):
+    rep = int(fname.split("_")[-1][:-4])
+    param_combo = int(fname.split("_")[-5])
+    return param_combo, rep
+
+def make_ML_table(llhood_nonplei, llhood_plei, fname_ML_table, wildcards, beta_type="hat"):
+    result = {"trait":[], "model":[], "beta":[], "p_thresh":[], "param_combo":[], "rep":[], "I1":[], "I2":[], "Ip":[],
+                  "ll_neut":[],
+                  "I2_stab":[], "ll_stab":[],
+                  "I1_dir":[], "ll_dir":[],
+                  "Ip_plei":[], "ll_plei":[]}
+    I1 = None
+    I2 = None
+    Ip = None
+
+    for ii, ll_fname in enumerate(llhood_nonplei):
+        param_combo, rep = get_info(ll_fname)
+        param_combo_p, rep_p = get_info(llhood_plei[ii])
+        assert (param_combo == param_combo_p) & (rep == rep_p), "Lists don't have same order"
+
+        if wildcards.model == "dir":
+            I1 = param_combos[wildcards.trait]["dir"][param_combo]
+        if wildcards.model == "stab":
+            I2 = param_combos[wildcards.trait]["stab"][param_combo]
+        if wildcards.model == "plei":
+            Ip = param_combos[wildcards.trait]["plei"][param_combo]
+
+        with open(ll_fname, "rb") as f:
+            ll_np = pickle.load(f)
+        with open(llhood_plei[ii], "rb") as f:
+            ll_p = pickle.load(f)
+        
+        ml_nonplei = smile_stats.llhood_to_maximums_db(ll_np, simple=True)
+        ml_plei = smile_stats.llhood_to_maximums_plei_db(ll_p, simple=True)
+
+        result["trait"].append(wildcards.trait)
+        result["model"].append(wildcards.model)
+        result["beta"].append(beta_type)
+        result["p_thresh"].append(wildcards.p_thresh)
+        result["param_combo"].append(param_combo)
+        result["rep"].append(rep)
+        result["I1"].append(I1)
+        result["I2"].append(I2)
+        result["Ip"].append(Ip)
+
+        result["ll_neut"].append(np.round(ml_nonplei["ll_ml_neut_db"], 2))
+        result["I2_stab"].append(np.round(ml_nonplei["I2_ml_stab_db"], 5))
+        result["ll_stab"].append(np.round(ml_nonplei["ll_ml_stab_db"], 2))
+        result["I1_dir"].append(np.round(ml_nonplei["I1_ml_dir_db"], 5))
+        result["ll_dir"].append(np.round(ml_nonplei["ll_ml_dir_db"], 2))
+        result["Ip_plei"].append(np.round(ml_plei["Ip_ml_plei_db"], 5))
+        result["ll_plei"].append(np.round(ml_plei["ll_ml_plei_db"], 2))
+    
+    pd.DataFrame(result).to_csv(fname_ML_table, sep="\t", index=None)
+
+rule ML_table:
+    input:
+        llhood_nonplei = lambda wildcards: [os.path.join(scratch_dir, "sample",
+                                                         "nonplei_{trait}_{p_thresh}_{model}_param_combo_" +
+                                                         str(param_combo) + "_nsamp_{nsamp}_rep_" + str(rep) + ".pkl")
+                                            for param_combo in range(model_range_sizes[wildcards.model]) for rep in range(nrep)],
+        llhood_plei = lambda wildcards: [os.path.join(scratch_dir, "sample",
+                                                      "plei_{trait}_{p_thresh}_{model}_param_combo_" +
+                                                      str(param_combo) + "_nsamp_{nsamp}_rep_" + str(rep) + ".pkl")
+                                         for param_combo in range(model_range_sizes[wildcards.model]) for rep in range(nrep)]
+    output:
+        ML_table = os.path.join(out_dir, "ML", "ML_table_{trait}_{model}_{p_thresh}_nsamp_{nsamp}.tsv")
+    run:
+        make_ML_table(input.llhood_nonplei, input.llhood_plei, output.ML_table, wildcards)
+
+rule ML_table_ash:
+    input:
+        llhood_nonplei = lambda wildcards: [os.path.join(scratch_dir, "sample",
+                                                         "beta_ash_nonplei_{trait}_{p_thresh}_{model}_param_combo_" +
+                                                         str(param_combo) + "_nsamp_{nsamp}_rep_" + str(rep) + ".pkl")
+                                            for param_combo in range(model_range_sizes[wildcards.model]) for rep in range(nrep)],
+        llhood_plei = lambda wildcards: [os.path.join(scratch_dir, "sample",
+                                                      "beta_ash_plei_{trait}_{p_thresh}_{model}_param_combo_" +
+                                                      str(param_combo) + "_nsamp_{nsamp}_rep_" + str(rep) + ".pkl")
+                                         for param_combo in range(model_range_sizes[wildcards.model]) for rep in range(nrep)]
+    output:
+        ML_table = os.path.join(out_dir, "ML", "ML_table_beta_ash_{trait}_{model}_{p_thresh}_nsamp_{nsamp}.tsv")
+    run:
+        make_ML_table(input.llhood_nonplei, input.llhood_plei, output.ML_table, wildcards, beta_type="ash")
+
+rule ML_table_true:
+    input:
+        llhood_nonplei = lambda wildcards: [os.path.join(scratch_dir, "sample",
+                                                         "beta_true_nonplei_{trait}_{p_thresh}_{model}_param_combo_" +
+                                                         str(param_combo) + "_nsamp_{nsamp}_rep_" + str(rep) + ".pkl")
+                                            for param_combo in range(model_range_sizes[wildcards.model]) for rep in range(nrep)],
+        llhood_plei = lambda wildcards: [os.path.join(scratch_dir, "sample",
+                                                      "beta_true_plei_{trait}_{p_thresh}_{model}_param_combo_" +
+                                                      str(param_combo) + "_nsamp_{nsamp}_rep_" + str(rep) + ".pkl")
+                                         for param_combo in range(model_range_sizes[wildcards.model]) for rep in range(nrep)]
+    output:
+        ML_table = os.path.join(out_dir, "ML", "ML_table_beta_true_{trait}_{model}_{p_thresh}_nsamp_{nsamp}.tsv")
+    run:
+        make_ML_table(input.llhood_nonplei, input.llhood_plei, output.ML_table, wildcards, beta_type="true")

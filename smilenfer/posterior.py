@@ -12,12 +12,12 @@ from . import statistics as smile_stats
 import scipy.stats as stats
 import scipy.optimize as opt
 
-def inv_logsf_chi2(neg_log10_p):
+def inv_logsf_chi2(neg_log10_p, df=1):
     ## Solve for the chi2 value that corresponds to a given p-value
     ## using the inverse survival function of the chi2 distribution
 
     # define the chi2 inverse survivaf function
-    log10sf = lambda x: -stats.chi2.logsf(x, 1) / np.log(10)
+    log10sf = lambda x: -stats.chi2.logsf(x, df) / np.log(10)
     
     if neg_log10_p > 305:
         return 4.59116667840005 * neg_log10_p - 5.1735856012059855
@@ -85,7 +85,7 @@ def custom_converter(value):
 def read_and_process_trait_data(trait_fname, cut_top=0, cojo_filter=False, rel_n_eff_min=-np.inf, rel_n_eff_max=np.inf,
                                 style="finngen", sep=None, compression="infer",
                                 beta_col="orig_b", freq_col="freq", alt_freq_col=None,
-                                var_inflation_cutoff=None, RDS=None):
+                                var_inflation_cutoff=None, RDS=None, max_r2_cutoff=0.2):
     """
     Read and process trait data from a file.
 
@@ -131,6 +131,19 @@ def read_and_process_trait_data(trait_fname, cut_top=0, cojo_filter=False, rel_n
         trait_data = trait_data.loc[~np.isnan(trait_data.rbeta), :]
         trait_data = trait_data.loc[~np.isnan(trait_data.mlogp), :]
         trait_data = trait_data.loc[~np.isnan(trait_data.se), :]
+        if "max_r2" in trait_data.columns:
+            n_variants = trait_data.shape[0]
+            trait_data = trait_data.loc[trait_data.max_r2 < max_r2_cutoff, :]
+            print(trait_fname)
+            # print(f"Removed {n_variants-trait_data.shape[0]} variants with max_r2 > {max_r2_cutoff}")
+            print(f"Remaining variants: {trait_data.shape[0]} out of {n_variants} after removing variants with max_r2 >= {max_r2_cutoff}")
+        # Filter the MHC
+        mhc_set = ((trait_data.chr.to_numpy(dtype=int) == 6) & 
+                   (trait_data.pos.to_numpy(dtype=int) > 24e6) & 
+                   (trait_data.pos.to_numpy(dtype=int) < 36e6))
+        trait_data = trait_data.loc[~mhc_set, :]
+        print(f"Removed {np.sum(mhc_set)} variants near the MHC")
+            
         # Remove rows where cojo_locus is True
         if cojo_filter:
             trait_data = trait_data.loc[~trait_data.cojo_locus, :]

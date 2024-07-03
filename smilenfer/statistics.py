@@ -1449,7 +1449,7 @@ def llhood_all_db(x_data, beta_data, v_cutoff, Ne, grid_size_1d, grid_size_2d, p
                   min_x=0.01, kill=True, neut_min=0.01, beta_obs=None,
                   I1_set_1d=None, I2_set_1d=None, I1_set_2d=None, I2_set_2d=None,
                   xmin=0.001, xmax=0.999, simple=False, neut_db=True, stab_db=True, WF_pile=None,
-                  S_dir_max=1000, S_dir_min=0.01, S_ud_max=1000, S_ud_min=0.01, neff=None, n_x=200):
+                  S_dir_max=1000, S_dir_min=0.01, S_ud_max=1000, S_ud_min=0.01, neff=None, n_x=200, single_s=False):
     pi_grid = make_pi_grid(xmin, xmax, pi_size)
     if I1_set_1d is None:
         I1_set_1d, I2_set_1d, _, _, _ = choose_param_range(beta_data, grid_size_1d, Ne=Ne,
@@ -1473,6 +1473,14 @@ def llhood_all_db(x_data, beta_data, v_cutoff, Ne, grid_size_1d, grid_size_2d, p
                                                                   beta_obs=beta_obs,
                                                                   WF_pile=WF_pile, neff=neff,
                                                                   n_x=n_x)
+
+    if single_s:
+        s_min = S_ud_min / (2*Ne)
+        s_max = S_ud_max / (2*Ne)
+        s_set = np.logspace(np.log10(s_min), np.log10(s_max), grid_size_1d)
+        llhood_s, s_set, w_s = llhood_grid_s_setup(x_data, beta_data, v_cutoff, s_set, Ne,
+                                                   min_x=min_x, neut_min=neut_min, beta_obs=beta_obs,
+                                                   WF_pile=WF_pile, neff=neff, n_x=n_x)
 
     if not simple:
         if WF_pile is not None:
@@ -1511,6 +1519,14 @@ def llhood_all_db(x_data, beta_data, v_cutoff, Ne, grid_size_1d, grid_size_2d, p
                              "pi_grid":pi_set},
                             pi_val=0.5, sel_model="neut")
         result["llhood_neut_db"] = neut_db["llhood_neut_db"]
+
+    if single_s:
+        # raise not implemented error if stab_db is not True
+        if not stab_db:
+            raise NotImplementedError("stab_db must be True to use single_s")
+        result["llhood_s"] = llhood_s
+        result["s_set"] = s_set
+        result["w_s"] = w_s
 
     return result
 

@@ -296,6 +296,7 @@ def plot_smile_fit(raf, beta_hat, beta_post, v_cut, model, params, WF_pile=None,
     ax_1.set_ylim(min_beta/1.25, max_beta*1.25)
     y1, y2 = ax_1.get_ylim()
     yticks1 = np.round(np.logspace(np.log10(y1*1.1), np.log10(y2/1.1), 5), 3)
+    print(yticks1)
     ax_1.set_yticks(yticks1)
     frmt = matplotlib.ticker.ScalarFormatter()
     ax_1.get_yaxis().set_major_formatter(frmt)
@@ -1290,7 +1291,7 @@ def get_nearest_protein_coding_gene(gtf_file, chromosomes, positions, use_start=
 
     return nearest_genes, distances, in_exon
 
-def read_trait_files(data_dir, ash_type="genome_wide_ash"):
+def read_trait_files(data_dir, ash_type="genome_wide_ash", fname="clumped.{ash_type}.{trait}.max_r2.tsv"):
     main_traits = ["bc", "bmi", "cad", "dbp", "hdl", "height", "ibd", "ldl", "rbc", 
                    "sbp", "scz", "t2d", "triglycerides", "urate", "wbc"]
     update_traits = ["asthma", "arthrosis", "diverticulitis", "fvc", "gallstones", "glaucoma", "grip_strength", 
@@ -1308,7 +1309,7 @@ def read_trait_files(data_dir, ash_type="genome_wide_ash"):
     all_traits = all_traits[all_order]
     all_labels = all_labels[all_order]
 
-    fname = "clumped.{ash_type}.{trait}.tsv"
+    # fname = "clumped.{ash_type}.{trait}.tsv"
 
     data_main_traits = {trait: smile_post.read_and_process_trait_data(os.path.join(data_dir, fname.format(ash_type=ash_type, trait=trait))) 
                         for trait in main_traits}

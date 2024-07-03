@@ -6,144 +6,24 @@ import pandas as pd
 import matplotlib
 import matplotlib.pyplot as plt
 from scipy.stats import chi2
+import scipy.optimize as opt
 
 import smilenfer.plotting as splot
+import smilenfer.posterior as post
 splot._plot_params()
 matplotlib.rcParams.update({'font.size': 18})
 
 def log10_t(x): return x / np.log(10)
 
-# A modified version of the function from smilenfer.plotting for making publication-level figures
-def plot_ML_table(ML_table, ML_table_lax, trait_groups, trait_group_labels, 
-                  ss=100, fit="post", fit_lax=None, logy=False, pval=False, kill_offset=False):
-    if fit_lax is None:
-        fit_lax = fit
-    ML_tmp = ML_table.copy()
-    ML_tmp_lax = ML_table_lax.copy() if ML_table_lax is not None else ML_table.copy()
-    group_sizes = [len(group) for group in trait_groups.values()]
-    trait_cats = list(trait_groups.keys())
-    n_traits = sum(group_sizes)
-    trait_mult = 1.5
-
-    fig, axes = plt.subplots(nrows=1, ncols=len(trait_groups), sharey=True,
-                             figsize=(max(n_traits*trait_mult, 6), 6),
-                             gridspec_kw={'width_ratios': group_sizes})
-
-    if kill_offset:
-        offset_small = 0
-        offset_large = 0
+def stable_chi2_log10sf(y, df):
+    # check if logsf is -inf
+    if chi2.logsf(y, df) == -np.inf:
+        return -opt.newton(lambda x: post.inv_logsf_chi2(x) - y, 1)
     else:
-        offset_small = 0.2/3
-        offset_large = 0.2
+        return chi2.logsf(y, df) / np.log(10)
 
-    marker_dir = ">"
-    marker_stab = "s"
-    marker_full = "D"
-    marker_plei = "o"
-
-    c_dir = "#a65628"
-    c_stab = "#984ea3"
-    c_full = "#999999"
-    c_plei = "#377eb8"
-
-    if len(trait_groups) == 1:
-        axes = [axes]
-
-    # Adjust likelihoods
-    for model in ["neut", "dir", "stab", "full", "plei"]:
-        if model == "neut":
-            adjust = 0
-        elif model == "full":
-            adjust = 2
-        else:
-            adjust = 1
-        if pval:
-            adjust = 0
-        ML_tmp["ll_" + model] = -(2*adjust - 2*ML_tmp["ll_" + model].to_numpy())
-        ML_tmp_lax["ll_" + model] = -(2*adjust  - 2*ML_tmp_lax["ll_" + model].to_numpy())
-
-    # Compute model comparison statistics
-    for model in ["dir", "stab", "full", "plei"]:
-        if not pval:
-            ML_tmp["stat_" + model] = ML_tmp["ll_" + model] - ML_tmp["ll_neut"]
-            ML_tmp_lax["stat_" + model] = ML_tmp_lax["ll_" + model] - ML_tmp_lax["ll_neut"]
-            # replace negative values with 0
-            ML_tmp["stat_" + model] = ML_tmp["stat_" + model].clip(lower=0)
-            ML_tmp_lax["stat_" + model] = ML_tmp_lax["stat_" + model].clip(lower=0)
-        if pval:
-            if model == "full":
-                ML_tmp["stat_" + model] = chi2.logsf(ML_tmp["ll_" + model] - ML_tmp["ll_neut"], 2)
-                ML_tmp_lax["stat_" + model] = chi2.logsf(ML_tmp_lax["ll_" + model] - ML_tmp_lax["ll_neut"], 2)
-            else: 
-                ML_tmp["stat_" + model] = chi2.logsf(ML_tmp["ll_" + model] - ML_tmp["ll_neut"], 1)
-                ML_tmp_lax["stat_" + model] = chi2.logsf(ML_tmp_lax["ll_" + model] - ML_tmp_lax["ll_neut"], 1)
-                # compute -log10 p-values in numerically stable way
-
-            # Take -log10 of p-values
-            ML_tmp["stat_" + model] = ML_tmp["stat_" + model] / -np.log(10)
-            ML_tmp_lax["stat_" + model] = ML_tmp_lax["stat_" + model] / -np.log(10)
-
-    all_ML = np.concatenate([ML_tmp["ll_" + model] - ML_tmp["ll_neut"] for model in ["dir", "stab", "full", "plei"]] + 
-                            [ML_tmp_lax["ll_" + model] - ML_tmp_lax["ll_neut"] for model in ["dir", "stab", "full", "plei"]])
-    y_max = np.max(all_ML)
-
-    for ii, ax in enumerate(axes):
-        ax.set_xlim([-0.5, group_sizes[ii]-0.5])
-        ax.set_xticks(range(group_sizes[ii]))
-        xticklabels = trait_groups[trait_cats[ii]]
-        xticklabels = [xticklabel.replace("_", " ") for xticklabel in xticklabels]
-        ax.set_xticklabels(xticklabels)
-        ax.tick_params(axis='x', labelrotation = 80)
-        ax.set_title(trait_group_labels[ii])
-        for jj, trait in enumerate(trait_groups[trait_cats[ii]]):
-            ML_trait = ML_tmp.loc[np.logical_and(ML_tmp.trait==trait, ML_tmp.beta==fit)]
-            ML_trait_lax = ML_tmp_lax.loc[np.logical_and(ML_tmp_lax.trait==trait, ML_tmp_lax.beta==fit_lax)]
-            
-            plot_both = (ML_trait.ll_full > ML_trait.ll_stab).any() or (ML_trait_lax.ll_full > ML_trait_lax.ll_stab).any()
-            ax.scatter(jj-offset_large, ML_trait.stat_dir,
-                       marker=marker_dir, c=c_dir, s=ss, label="directional")
-            ax.scatter(jj-offset_small, ML_trait.stat_stab,
-                       marker=marker_stab, c=c_stab, s=ss, label="1D Stabilizing")
-            if plot_both:
-                ax.scatter(jj+offset_small, ML_trait.stat_full,
-                           marker=marker_full, c=c_full, s=ss, label="dir. + 1-D stab.")
-            ax.scatter(jj+offset_large, ML_trait.stat_plei,
-                       marker=marker_plei, c=c_plei, s=ss, label="hD pleiotropic")
-            
-            if ML_table_lax is not None:
-                ax.scatter(jj-0.2, ML_trait_lax.stat_dir,
-                            marker=marker_dir, c=c_dir, s=ss, alpha=0.35)
-                ax.scatter(jj-0.2/3, ML_trait_lax.stat_stab,
-                                marker=marker_stab, c=c_stab, s=ss, alpha=0.35)
-                if plot_both:
-                    ax.scatter(jj+0.2/3, ML_trait_lax.stat_full,
-                            marker=marker_full, c=c_full, s=ss, alpha=0.35)
-                ax.scatter(jj+0.2, ML_trait_lax.stat_plei,
-                                marker=marker_plei, c=c_plei, s=ss, alpha=0.35)
-    
-    if not pval:
-        if logy:
-            ax.set_ylim(-0.2, y_max*1.2)
-            ax.set_yscale("symlog", linthresh=4)
-            ax.set_yticks([0, 2.] + list(5*2**np.arange(0, np.log2(y_max/5))))
-            ax.set_yticklabels(["<0", 2.] + list(5*2**np.arange(0, np.log2(y_max/5))))
-        else:
-            y1, y2 = axes[0].get_ylim()
-            if y1 > 0:
-                y1 = -1/np.log(10)
-            axes[0].set_ylim(y1, y2)
-        axes[0].set_ylabel(r"$-\Delta \mathrm{AIC}_{\mathrm{model} - \mathrm{neut}}$")
-    else:
-        ax.set_yscale("symlog", linthresh=10)
-        ax.set_yticks([0, -np.log10(0.05), 2.] + list(5*2**np.arange(0, np.log2(20/5))))
-        ax.set_yticklabels([0, np.round(-np.log10(0.05), 2), 2.] + list(5*2**np.arange(0, np.log2(20/5))))
-
-        axes[0].set_ylabel(r"$-\log_{10} p\mathrm{-value}$")
-
-
-    axes[-1].legend(labels=["Directional", "1D Stabilizing", "Dir. + Stab.", "hD Stabilizing"],
-                    loc="upper left", bbox_to_anchor=(1.0, 0.9), ncol=1)
-    return fig, axes
+# vectorized version of the function
+stable_chi2_log10sf = np.vectorize(stable_chi2_log10sf)
 
 # A modified version of the function from smilenfer.plotting for making publication-level figures
 def plot_ML_table_2(ML_table, trait_groups, trait_group_labels, trait_names,
@@ -167,8 +47,8 @@ def plot_ML_table_2(ML_table, trait_groups, trait_group_labels, trait_names,
         offset_small = 0
         offset_large = 0
     else:
-        offset_small = 0.2/3
-        offset_large = 0.2
+        offset_small = 0.3/3
+        offset_large = 0.3
 
     marker_dir = ">"
     marker_stab = "s"
@@ -216,13 +96,10 @@ def plot_ML_table_2(ML_table, trait_groups, trait_group_labels, trait_names,
             ML_tmp["stat_" + model] = ML_tmp["stat_" + model].clip(lower=0)
         if pval:
             if model == "full":
-                ML_tmp["stat_" + model] = chi2.logsf(ML_tmp["ll_" + model] - ML_tmp["ll_neut"], 2)
+                ML_tmp["stat_" + model] = -stable_chi2_log10sf(ML_tmp["ll_" + model] - ML_tmp["ll_neut"], 2)
             else: 
-                ML_tmp["stat_" + model] = chi2.logsf(ML_tmp["ll_" + model] - ML_tmp["ll_neut"], 1)
+                ML_tmp["stat_" + model] = -stable_chi2_log10sf(ML_tmp["ll_" + model] - ML_tmp["ll_neut"], 1)
                 # compute -log10 p-values in numerically stable way
-
-            # Take -log10 of p-values
-            ML_tmp["stat_" + model] = ML_tmp["stat_" + model] / -np.log(10)
 
     all_ML = np.concatenate([ML_tmp["ll_" + model] - ML_tmp["ll_neut"] for model in ["dir", "stab", "full", "plei"]])
     y_max = np.max(all_ML)
@@ -262,11 +139,13 @@ def plot_ML_table_2(ML_table, trait_groups, trait_group_labels, trait_names,
             ax.axhline(y=-np.log10(0.05), linestyle="--", linewidth=1.5, color="palevioletred", alpha=0.8, label="Nominal Sig.")
             ax.axhline(y=-np.log10(0.05 / len(trait_names)), linestyle="--", linewidth=1.5, color="darkorchid", alpha=0.8, label="Adjusted Sig.")
             ML_trait = ML_tmp.loc[np.logical_and(ML_tmp.trait==trait, ML_tmp.beta==fit)]
-            dir_h = ax.scatter(offset_large, ML_trait.stat_dir,
+            if trait == "HEIGHT":
+                print(ML_trait)
+            dir_h = ax.scatter(-offset_large, ML_trait.stat_dir,
                        marker=marker_dir, c=c_dir, s=ss, label="directional", 
                        edgecolors=c_dir_dark, linewidths=1.5)
             dir_h.set_facecolor(matplotlib.colors.to_rgb(c_dir) + (0.5,))
-            stab_h = ax.scatter(offset_small, ML_trait.stat_stab,
+            stab_h = ax.scatter(-offset_small, ML_trait.stat_stab,
                        marker=marker_stab, c=c_stab, s=ss, label="1D Stabilizing",
                        edgecolors=c_stab_dark, linewidths=1.5)
             stab_h.set_facecolor(matplotlib.colors.to_rgb(c_stab) + (0.5,))
@@ -343,11 +222,8 @@ disease_names = {"ARTHROSIS":"Arthrosis", "ASTHMA":"Asthma", "DIVERTICULITIS":"D
 disease_groups = {"Disease": diseases}
 disease_group_labels = ["Disease"]
 
-ml_pcut_table_diseases = pd.read_csv(os.path.join(DATA_DIR, "new_diseases_simple_no_filter/ML_all_flat_5e-08_new.csv"), sep=",")
-
-
 # merge the ml_ tables because they have the same columns
-ml_all = ml_pcut_table_new.copy()# pd.concat([ml_pcut_table_new, ml_pcut_table_diseases])
+ml_all = ml_pcut_table_new.copy()
 
 UKB_quant_trait_names = {"GRIP_STRENGTH":"Grip strength", "FVC":"FVC", "PULSE_RATE":"Pulse rate"}
 all_new_trait_names = {**UKB_quant_trait_names, **disease_names}
@@ -357,7 +233,7 @@ all_new_traits = [key.upper() for key in all_new_trait_names.keys()]
 
 ml_new_traits = ml_all[ml_all.trait.isin(all_new_traits)]
 fig, axes = plot_ML_table_2(ml_new_traits, all_new_trait_groups, ["Quantitative", "Disease"], all_new_trait_names,
-                            ss=100, fit="ash", logy=True, pval=True, kill_offset=True, kill_full=False)
+                            ss=100, fit="ash", logy=True, pval=True, kill_offset=False, kill_full=False)
 
 fig.savefig("figure_2_follow_full.pdf", bbox_inches="tight")
 
@@ -371,5 +247,5 @@ trait_groups = {"Quantitative": ["HEIGHT", "BMI", "LDL", "HDL", "DBP", "SBP", "T
 trait_group_labels = ["Quantitative", "Disease"]
 
 fig, axes = plot_ML_table_2(ml_pcut_table_new, trait_groups, trait_group_labels, trait_names,
-                            ss=100, fit="ash", logy=True, pval=True, kill_offset=True, kill_full=False)
+                            ss=100, fit="ash", logy=True, pval=True, kill_offset=False, kill_full=False)
 fig.savefig("figure_2_initial_full.pdf", bbox_inches="tight")

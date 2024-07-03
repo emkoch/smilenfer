@@ -252,7 +252,8 @@ artists = []
 # Plot the paired boxplots
 for i, (t1, t2, t3) in enumerate(tables):
     boxplot = axes[2,0].boxplot([t1, t2, t3], positions=[positions[i], positions[i]+0.7, positions[i]+1.4], 
-                      labels=["", "", ""], whis=(0,95), widths=0.65, showfliers=False, patch_artist=True)
+                      labels=["", "", ""], #whis=(0,95),
+                        widths=0.65, showfliers=False, patch_artist=True)
     
     # Set different colors for the boxplots in each pair
     for j, patch in enumerate(boxplot['boxes']):

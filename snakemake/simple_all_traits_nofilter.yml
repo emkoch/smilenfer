@@ -1,12 +1,12 @@
 ---
-data_dir: "/home/emk31/polygenic_selection/programs/smilenfer-dev/results/data/clumped_ash"
+data_dir: "/home/emk31/polygenic_selection/programs/smilenfer/results/data/clumped_ash"
 out_dir: "output"
 scratch_dir: "/n/scratch/users/e/emk31/polygenic_selection/simple_all_traits_nofilter_genomewide"
-sfs_grid: "/home/emk31/polygenic_selection/programs/smilenfer-dev/results/data/WF_pile/SFS_pile.npy"
-interp_x: "/home/emk31/polygenic_selection/programs/smilenfer-dev/results/data/WF_pile/x_set.npy"
-s_set: "/home/emk31/polygenic_selection/programs/smilenfer-dev/results/data/WF_pile/s_set.npy"
-s_ud_set: "/home/emk31/polygenic_selection/programs/smilenfer-dev/results/data/WF_pile/s_ud_set.npy"
-tenn_N: "/home/emk31/polygenic_selection/programs/smilenfer-dev/results/data/WF_pile/tenn_N.npy"
+sfs_grid: "/home/emk31/polygenic_selection/programs/smilenfer/results/data/WF_pile/SFS_pile.npy"
+interp_x: "/home/emk31/polygenic_selection/programs/smilenfer/results/data/WF_pile/x_set.npy"
+s_set: "/home/emk31/polygenic_selection/programs/smilenfer/results/data/WF_pile/s_set.npy"
+s_ud_set: "/home/emk31/polygenic_selection/programs/smilenfer/results/data/WF_pile/s_ud_set.npy"
+tenn_N: "/home/emk31/polygenic_selection/programs/smilenfer/results/data/WF_pile/tenn_N.npy"
 trait_files:
   ARTHROSIS: "clumped.genome_wide_ash.arthrosis.max_r2.tsv"
   ASTHMA: "clumped.genome_wide_ash.asthma.max_r2.tsv"

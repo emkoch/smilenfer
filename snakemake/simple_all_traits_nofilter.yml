@@ -1,0 +1,86 @@
+---
+data_dir: "/home/emk31/polygenic_selection/programs/smilenfer-dev/results/data/clumped_ash"
+out_dir: "output"
+scratch_dir: "/n/scratch/users/e/emk31/polygenic_selection/simple_all_traits_nofilter_genomewide"
+sfs_grid: "/home/emk31/polygenic_selection/programs/smilenfer-dev/results/data/WF_pile/SFS_pile.npy"
+interp_x: "/home/emk31/polygenic_selection/programs/smilenfer-dev/results/data/WF_pile/x_set.npy"
+s_set: "/home/emk31/polygenic_selection/programs/smilenfer-dev/results/data/WF_pile/s_set.npy"
+s_ud_set: "/home/emk31/polygenic_selection/programs/smilenfer-dev/results/data/WF_pile/s_ud_set.npy"
+tenn_N: "/home/emk31/polygenic_selection/programs/smilenfer-dev/results/data/WF_pile/tenn_N.npy"
+trait_files:
+  ARTHROSIS: "clumped.genome_wide_ash.arthrosis.max_r2.tsv"
+  ASTHMA: "clumped.genome_wide_ash.asthma.max_r2.tsv"
+  BC: "clumped.genome_wide_ash.bc.max_r2.tsv"
+  BMI: "clumped.genome_wide_ash.bmi.max_r2.tsv"
+  CAD: "clumped.genome_wide_ash.cad.max_r2.tsv"
+  DBP: "clumped.genome_wide_ash.dbp.max_r2.tsv"
+  DIVERTICULITIS: "clumped.genome_wide_ash.diverticulitis.max_r2.tsv"
+  FVC: "clumped.genome_wide_ash.fvc.max_r2.tsv"
+  GALLSTONES: "clumped.genome_wide_ash.gallstones.max_r2.tsv"
+  GLAUCOMA: "clumped.genome_wide_ash.glaucoma.max_r2.tsv"
+  GRIP_STRENGTH: "clumped.genome_wide_ash.grip_strength.max_r2.tsv"
+  HDL: "clumped.genome_wide_ash.hdl.max_r2.tsv"
+  HEIGHT: "clumped.genome_wide_ash.height.max_r2.tsv"
+  HYPOTHYROIDISM: "clumped.genome_wide_ash.hypothyroidism.max_r2.tsv"
+  IBD: "clumped.genome_wide_ash.ibd.max_r2.tsv"
+  LDL: "clumped.genome_wide_ash.ldl.max_r2.tsv"  
+  MALIGNANT_NEOPLASMS: "clumped.genome_wide_ash.malignant_neoplasms.max_r2.tsv"
+  PULSE_RATE: "clumped.genome_wide_ash.pulse_rate.max_r2.tsv"
+  RBC: "clumped.genome_wide_ash.rbc.max_r2.tsv"
+  SBP: "clumped.genome_wide_ash.sbp.max_r2.tsv"
+  SCZ: "clumped.genome_wide_ash.scz.max_r2.tsv"
+  T2D: "clumped.genome_wide_ash.t2d.max_r2.tsv"
+  TRIGLYCERIDES: "clumped.genome_wide_ash.triglycerides.max_r2.tsv"
+  URATE: "clumped.genome_wide_ash.urate.max_r2.tsv"
+  UTERINE_FIBROIDS: "clumped.genome_wide_ash.uterine_fibroids.max_r2.tsv"
+  VARICOSE_VEINS: "clumped.genome_wide_ash.varicose_veins.max_r2.tsv"
+  WBC: "clumped.genome_wide_ash.wbc.max_r2.tsv"
+trait_types:
+  ARTHROSIS: "disease"
+  ASTHMA: "disease"
+  BC: "disease"
+  BMI: "quantitative"
+  CAD: "disease"
+  DBP: "quantitative"
+  DIVERTICULITIS: "disease"
+  FVC: "quantitative"
+  GALLSTONES: "disease"
+  GLAUCOMA: "disease"
+  GRIP_STRENGTH: "quantitative"
+  HDL: "quantitative"
+  HEIGHT: "quantitative"
+  HYPOTHYROIDISM: "disease"
+  IBD: "disease"
+  LDL: "quantitative"  
+  MALIGNANT_NEOPLASMS: "disease"
+  PULSE_RATE: "quantitative"
+  RBC: "quantitative"
+  SBP: "quantitative"
+  SCZ: "disease"
+  T2D: "disease"
+  TRIGLYCERIDES: "quantitative"
+  URATE: "quantitative"
+  UTERINE_FIBROIDS: "disease"
+  VARICOSE_VEINS: "disease"
+  WBC: "quantitative"
+trait_type_abbrevs:
+  disease: "Disease"
+  quantitative: "Quantitative"
+models: ["neut", "dir_db", "stab_db", "full_db", "plei_db"]
+plot_models: ["dir_db", "stab_db", "full_db", "plei_db"]
+traits: ["ARTHROSIS", "ASTHMA", "BC", "BMI", "CAD", "DBP", "DIVERTICULITIS", "FVC", "GALLSTONES", "GLAUCOMA", "GRIP_STRENGTH", "HDL", "HEIGHT", "HYPOTHYROIDISM", "IBD", "LDL", "MALIGNANT_NEOPLASMS", "PULSE_RATE", "RBC", "SBP", "SCZ", "T2D", "TRIGLYCERIDES", "URATE", "UTERINE_FIBROIDS", "VARICOSE_VEINS", "WBC"]
+p_threshes: ["5e-08"]
+p_cutoffs: ["5e-08"]
+truncation_size: 300000000
+Ne: 1e4
+min_x: 0.01
+min_x_ash: 0.01
+grid_size_1d: 1000
+grid_size_2d: 100
+pi_size: 100
+xmin_pi: 0.001
+xmax_pi: 0.999
+grid_size_Ip: 2000
+grid_size_I2: 200
+grid_size_nn: 20
+nn_max: 100

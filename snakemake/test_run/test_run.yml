@@ -1,0 +1,33 @@
+---
+data_dir: "../../results/data/clumped_ash/"
+out_dir: "output"
+scratch_dir: "scratch"
+sfs_grid: "../../results/data/WF_pile/SFS_pile.npy"
+interp_x: "../../results/data/WF_pile/x_set.npy"
+s_set: "../../results/data/WF_pile/s_set.npy"
+s_ud_set: "../../results/data/WF_pile/s_ud_set.npy"
+tenn_N: "../../results/data/WF_pile/tenn_N.npy"
+trait_files:
+  BC: "clumped.genome_wide_ash.bc.max_r2.tsv"
+trait_types:
+  BC: "disease"
+trait_type_abbrevs:
+  disease: "Disease"
+models: ["neut", "dir_db", "stab_db", "full_db", "plei_db"]
+plot_models: ["dir_db", "stab_db", "full_db", "plei_db"]
+traits: ["BC"]
+p_threshes: ["5e-08"]
+p_cutoffs: ["5e-08"]
+truncation_size: 300000000
+Ne: 1e4
+min_x: 0.01
+min_x_ash: 0.01
+grid_size_1d: 1000
+grid_size_2d: 100
+pi_size: 100
+xmin_pi: 0.001
+xmax_pi: 0.999
+grid_size_Ip: 2000
+grid_size_I2: 200
+grid_size_nn: 20
+nn_max: 100

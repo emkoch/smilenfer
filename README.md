@@ -10,3 +10,5 @@ Processed GWAS summary statistics, model fits, simulation output, and scripts fo
 Main code used for analyses, simulations, and plotting. This is organized as a python package and which can be installed by first creating a conda environment with the necessary dependencies `conda env create -f smilenfer.yml`. After activating the environment run `install.sh`. 
 ### snakemake
 Snakemake piplines used for model fits and simulations. After installing the pacakge, this is how model fits are actually performed.
+
+#### More information on requirements and runtime can be found in `example_trait/example_trait_analysis.sh`

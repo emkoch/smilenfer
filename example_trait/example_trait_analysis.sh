@@ -70,3 +70,4 @@ snakemake \
     --snakefile ../Snakefile_trait_fits_simple \
     --cores 1 \
     --configfile test_run.yml
+# Given 2Gb or ram, this process take up to six hours, depending on the number of genome-wide significant associations.

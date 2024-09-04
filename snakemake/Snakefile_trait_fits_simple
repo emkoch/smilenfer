@@ -151,25 +151,12 @@ rule all:
         expand(os.path.join(out_dir, "{trait}.vep"), trait=traits),
         expand(os.path.join(out_dir, "plots", "{trait}.{p_thresh}.{model}.{fit}.ML.pdf"),
                trait=traits,
-               p_thresh=config["p_threshes"],
+               p_thresh=p_threshes,
                model=plot_models,
                fit=fit_plots),
         expand(os.path.join(out_dir, "plots", "AIC.{p_thresh}.{fit}.pdf"),
-               p_thresh=config["p_threshes"],
-               fit=fit_types),
-        #expand(os.path.join(out_dir, "pointwise_llhood", "{trait}.{p_thresh}.{model}.{fit}.ML.npy"),
-        #       trait=traits,
-        #       p_thresh=config["p_threshes"],
-        #       model=["neut"] + plot_models,
-        #       fit=["orig", "ash"]),
-        #[ff.format(model_1=model_1, model_2=model_2) for model_1, model_2 in
-         #itertools.combinations(["neut"] + plot_models, 2)
-         #for ff in expand(os.path.join(out_dir, "plots", "pointwise_plots",
-         #                              "{trait}.{p_thresh}.{model_1}.{model_2}.{fit}.ML.pdf"),
-         #                 trait=traits,
-         #                 model_1="{model_1}", model_2="{model_2}",
-         #                 p_thresh=config["p_threshes"],
-         #                 fit=fit_types)]
+               p_thresh=p_threshes,
+               fit=fit_types)
 
 rule download_gencode:
     output:

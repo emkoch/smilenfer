@@ -149,12 +149,12 @@ rule all:
         expand(os.path.join(out_dir, "{trait}_{p_thresh}_cut_points.tsv"), trait=traits, p_thresh=p_threshes),
         expand(os.path.join(out_dir, "{trait}_nearest_genes.tsv"), trait=traits),
         expand(os.path.join(out_dir, "{trait}.vep"), trait=traits),
-        expand(os.path.join(out_dir, "plots", "{trait}.{p_thresh}.{model}.{fit}.ML.pdf"),
+        expand(os.path.join(out_dir, "plots", "{trait}_{p_thresh}_{model}_{fit}_ML.pdf"),
                trait=traits,
                p_thresh=p_threshes,
                model=plot_models,
                fit=fit_plots),
-        expand(os.path.join(out_dir, "plots", "AIC.{p_thresh}.{fit}.pdf"),
+        expand(os.path.join(out_dir, "plots", "AIC_{p_thresh}_{fit}.pdf"),
                p_thresh=p_threshes,
                fit=fit_types)
 
@@ -327,12 +327,9 @@ rule llhood_calc:
 rule plot_ML:
     input:
         ML = os.path.join(out_dir, "ML_all_flat_{p_thresh}_new.csv"),
-        data = lambda wildcards: os.path.join(data_dir, config["trait_files"][wildcards.trait])#,
-        #nearest_genes = os.path.join(out_dir, "{trait}_nearest_genes.tsv")#,
-        # vep = os.path.join(vep_dir, "{trait}.vep")
+        data = lambda wildcards: os.path.join(data_dir, config["trait_files"][wildcards.trait])
     output:
-        plot = os.path.join(out_dir, "plots", "{trait}.{p_thresh}.{model}.{fit}.ML.pdf")#,
-        #gene_plot = os.path.join(out_dir, "plots", "{trait}.{p_thresh}.{model}.{fit}.ML_gene.pdf")
+        plot = os.path.join(out_dir, "plots", "{trait}_{p_thresh}_{model}_{fit}_ML.pdf")
     run:
         trait_data = load_trait_data(input.data)
         p_thresh = float(wildcards.p_thresh)
@@ -380,32 +377,6 @@ rule plot_ML:
                                           color_only=True,
                                           v_cut=v_cutoff)
         fig.savefig(output.plot, bbox_inches="tight")
-        # nearest_genes = pd.read_csv(input.nearest_genes, sep="\t")
-        # vep = pd.read_csv(input.vep, sep="\t")
-        # vep["chr"] = [int(loc.split(":")[0]) for loc in vep.Location]
-        # vep["pos"] = [int(loc.split("-")[1]) for loc in vep.Location]
-        # consequences = vep.Consequence.to_numpy(dtype=str)
-        # ns_types = ["missense_variant", "stop_gained", "stop_lost", "start_lost"]
-        # plot_consequences = []
-        # for consequence in consequences:
-        #     cc = consequence.split(",")
-        #     cc_use = cc[0]
-        #     for cc_i in cc:
-        #         if cc_i in ns_types:
-        #             cc_use = "nonsynonymous"
-        #     plot_consequences.append(cc_use)
-        # vep["plot_consequence"] = plot_consequences
-        # nearest_genes = pd.merge(nearest_genes, vep, on=["chr", "pos"], how="left")
-        # nearest_genes["plot_distances"] = np.where(nearest_genes.plot_consequence.to_numpy() == "nonsynonymous",
-        #                                            nearest_genes.distances_tr.to_numpy(),
-        #                                            nearest_genes.distances.to_numpy())
-        # trait_data = pd.merge(trait_data, nearest_genes, on=["chr", "pos"], how="left")
-        # ax = splot.add_genes(ax, trait_data.raf.to_numpy(), np.abs(beta_hat),
-        #                      trait_data.nearest_gene.to_numpy(),
-        #                      trait_data.plot_distances.to_numpy(),
-        #                      trait_data.in_exon.to_numpy(),
-        #                      trait_data.plot_consequence.to_numpy(dtype=str))
-        # fig.savefig(output.gene_plot, bbox_inches="tight")
 
 rule ML_all:
     input:
@@ -463,11 +434,11 @@ rule ML_all:
 rule plot_ll_ML:
     input:
         data = lambda wildcards: os.path.join(data_dir, config["trait_files"][wildcards.trait]),
-        ll_model_1 = os.path.join(out_dir, "pointwise_llhood", "{trait}.{p_thresh}.{model_1}.{fit}.ML.npy"),
-        ll_model_2 = os.path.join(out_dir, "pointwise_llhood", "{trait}.{p_thresh}.{model_2}.{fit}.ML.npy")
+        ll_model_1 = os.path.join(out_dir, "pointwise_llhood", "{trait}_{p_thresh}_{model_1}_{fit}.ML.npy"),
+        ll_model_2 = os.path.join(out_dir, "pointwise_llhood", "{trait}_{p_thresh}_{model_2}_{fit}.ML.npy")
     output:
         pointwise_plot = os.path.join(out_dir, "plots", "pointwise_plots",
-                                      "{trait}.{p_thresh}.{model_1}.{model_2}.{fit}.ML.pdf")
+                                      "{trait}_{p_thresh}_{model_1}_{model_2}_{fit}_ML.pdf")
     run:
         trait_data = load_trait_data(input.data)
         p_thresh = float(wildcards.p_thresh)
@@ -509,7 +480,7 @@ rule post_ll_ML:
         data = lambda wildcards: os.path.join(data_dir, config["trait_files"][wildcards.trait]),
         WF_pile = os.path.join(out_dir, "WF_pile.pkl")
     output:
-        pointwise_ll = os.path.join(out_dir, "pointwise_llhood", "{trait}.{p_thresh}.{model}.{fit}.ML.npy")
+        pointwise_ll = os.path.join(out_dir, "pointwise_llhood", "{trait}_{p_thresh}_{model}_{fit}_ML.npy")
     run:
         WF_pile = load_WFP()
         # This returns beta_hat of the risk (+) allele
@@ -597,8 +568,8 @@ rule plot_AIC:
     input:
         ML = os.path.join(out_dir, "ML_all_flat_{p_thresh}_new.csv")
     output:
-        plot = os.path.join(out_dir, "plots", "AIC.{p_thresh}.{fit}.pdf"),
-        log_plot = os.path.join(out_dir, "plots", "AIC.{p_thresh}.{fit}.logy.pdf")
+        plot = os.path.join(out_dir, "plots", "AIC_{p_thresh}_{fit}.pdf"),
+        log_plot = os.path.join(out_dir, "plots", "AIC_{p_thresh}_{fit}.logy.pdf")
     run:
         ML_table = pd.read_csv(input.ML)
         trait_groups = {}

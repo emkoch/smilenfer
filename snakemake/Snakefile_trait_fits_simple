@@ -353,6 +353,7 @@ rule plot_ML:
             raise ValueError("Unknown fit type: " + wildcards.fit)
 
         model = wildcards.model.replace("_db", "")
+        model = model.replace("-db", "")
         # The starting I_1/I_2 values are scaled by the Ne given in the config
         # file and not the first entry in the population size trajectory. The
         # reason for this is that we may rescale the population size trajectory
@@ -463,16 +464,21 @@ rule plot_ll_ML:
 
         raf = trait_data.raf.to_numpy()
 
+        model_1 = wildcards.model_1.replace("_db", "")
+        model_1 = wildcards.model_1.replace("-db", "")
+        model_2 = wildcards.model_2.replace("_db", "")
+        model_2 = wildcards.model_2.replace("-db", "")
+
         if np.sum(pointwise_ll_1) > np.sum(pointwise_ll_2):
             fig, ax = splot.fit_plot_llhood_diff(raf, beta_hat, beta_post,
                                                  pointwise_ll_1, pointwise_ll_2,
-                                                 model_1=wildcards.model_1.replace("_db", ""),
-                                                 model_2=wildcards.model_2.replace("_db", ""))
+                                                 model_1=model_1,
+                                                 model_2=model_1)
         else:
             fig, ax = splot.fit_plot_llhood_diff(raf, beta_hat, beta_post,
                                                  pointwise_ll_2, pointwise_ll_1,
-                                                 model_1=wildcards.model_2.replace("_db", ""),
-                                                 model_2=wildcards.model_1.replace("_db", ""))
+                                                 model_1=model_1,
+                                                 model_2=model_1)
         fig.savefig(output.pointwise_plot, bbox_inches="tight")
 
 rule post_ll_ML:
@@ -506,6 +512,7 @@ rule post_ll_ML:
             raise ValueError("Unknown fit type: " + wildcards.fit)
 
         model = wildcards.model.replace("_db", "")
+        model = model.replace("-db", "")
         # The starting I_1/I_2 values are scaled by the Ne given in the config
         # file and not the first entry in the population size trajectory. The
         # reason for this is that we may rescale the population size trajectory

@@ -368,6 +368,8 @@ rule plot_ML:
             params["Ip"] = float(ML["Ip_" + model])
         if model == "nplei":
             params["nn"] = float(ML["nn_" + model])
+        if model not in ["dir", "stab", "full", "plei", "nplei"]:
+            raise ValueError("Unknown model type: " + model)
         fig, ax = splot.sim_plot_truebeta(raf_true=None,
                                           raf_sim=trait_data.raf.to_numpy(),
                                           beta_hat=beta_hat,
@@ -527,6 +529,8 @@ rule post_ll_ML:
             params["Ip"] = float(ML["Ip_" + model])
         if model == "nplei":
             params["nn"] = float(ML["nn_" + model])
+        if model not in ["dir", "stab", "full", "plei", "nplei"]:
+            raise ValueError("Unknown model type: " + model)
 
         raf = trait_data.raf.to_numpy()
 

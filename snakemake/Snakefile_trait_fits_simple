@@ -56,6 +56,7 @@ Ne_tenn = WF_pile_raw["tenn_N"][0]
 
 models = config["models"]
 plot_models = config["plot_models"]
+plot_models = [mm.replace("_", "-") for mm in plot_models]
 trait_types = config["trait_types"]
 trait_type_abbrevs = config["trait_type_abbrevs"]
 
@@ -104,6 +105,7 @@ grid_size_I2 = config["grid_size_I2"]
 grid_size_nn = config["grid_size_nn"]
 nn_max = config["nn_max"]
 traits = config["traits"]
+assert all('_' not in trait for traut in traits), "Please remove underscores from trait names!"
 
 # Whether to also fit a model with a single s value for all mutations
 single_s = bool(config["single_s"]) if "single_s" in config.keys() else False

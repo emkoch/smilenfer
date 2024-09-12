@@ -80,17 +80,30 @@ freq = "raf"
 fit_types = fit=["orig", "ash"]
 beta_columns_fit = {"orig":"rbeta", "ash":"PosteriorMean"}
 fit_plots = ["orig", "ash"]
-pp = "pval" #TODO: check what this is used for and ideally switch to neglog10_pval
+pp = "pval" 
+
+# p_threshes: list of p-values to use to drive variance explained thresholds
+# p_cutoffs:  p-values cutoffs to apply for each p_thresh
+
+assert len(config["p_threshes"]) == len(config["p_cutoffs"]), \
+        "p_threshes and p_cutoffs must be the same length:\n" + \
+        "p_threshes: list of p-values to use to drive variance explained thresholds\n" + \
+        "p_cutoffs:  p-values cutoffs to apply for each p_thresh"
 
 p_threshes = [float(p_thresh) for p_thresh in config["p_threshes"]]
 p_cutoffs = {}
 if "p_cutoffs" in config.keys():
-    assert len(config["p_threshes"])==len(config["p_cutoffs"])
-    for ii, p_thresh in enumerate(config["p_threshes"]):
+    assert len(config["p_threshes"]) == len(config["p_cutoffs"]), \
+        "p_threshes and p_cutoffs must be the same length:\n" + \
+        "p_threshes: list of p-values to use to drive variance explained thresholds\n" + \
+        "p_cutoffs:  p-values cutoffs to apply for each p_thresh"
+    for ii, p_thresh in enumerate(p_threshes):
         p_cutoffs[str(p_thresh)] = float(config["p_cutoffs"][ii])
 else:
-    for ii, p_thresh in enumerate(config["p_threshes"]):
+    for ii, p_thresh in enumerate(p_threshes):
         p_cutoffs[str(p_thresh)] = np.inf
+
+thresh_to_key = lambda p_thresh: str(float(p_thresh))
 
 Ne = float(config["Ne"])
 min_x = config["min_x"]
@@ -145,7 +158,7 @@ def load_WFP():
 rule all:
     input:
         os.path.join(scratch_dir, "gencode.v19.annotation.gtf.gz"),
-        expand(os.path.join(out_dir, "ML_all_flat_{p_thresh}_new.csv"), p_thresh=p_threshes), # ML ests and ll for all traits and models
+        expand(os.path.join(out_dir, "ML_all_flat_{p_thresh}_new.csv"), p_thresh=p_threshes),
         expand(os.path.join(out_dir, "plots", "raw_view", "{trait}_se.pdf"), trait=traits),
         expand(os.path.join(out_dir, "plots", "raw_view", "{trait}_smile.pdf"), trait=traits),
         expand(os.path.join(out_dir, "{trait}_{p_thresh}_cut_points.tsv"), trait=traits, p_thresh=p_threshes),
@@ -260,7 +273,7 @@ rule cut_points:
         v_cutoff = smile_stats.calc_cutoffs_new(trait_data.var_exp.to_numpy(), trait_data.pval.to_numpy(), 
                                                 n_eff=trait_data.median_n_eff.to_numpy()[0])[wildcards.p_thresh]
         cut_rows = np.array(trait_data.var_exp > v_cutoff) & np.array(trait_data.maf >= min_x)
-        cut_rows = cut_rows & np.array(trait_data.pval <= p_cutoffs[wildcards.p_thresh])
+        cut_rows = cut_rows & np.array(trait_data.pval <= p_cutoffs[thresh_to_key(wildcards.p_thresh)])
 
         x_data = trait_data[cut_rows].raf.to_numpy()
         beta_data = trait_data[cut_rows].rbeta.to_numpy()
@@ -290,7 +303,7 @@ rule llhood_calc:
         else:
             v_cutoff = stats.chi2.ppf(q=1-p_thresh, df=1)/trait_data.median_n_eff[0]
             cut_rows = np.array(trait_data.var_exp > v_cutoff) & np.array(trait_data.maf >= min_x)
-            cut_rows = cut_rows & np.array(trait_data.pval <= p_cutoffs[wildcards.p_thresh])
+            cut_rows = cut_rows & np.array(trait_data.pval <= p_cutoffs[thresh_to_key(wildcards.p_thresh)])
 
         x_data = trait_data[cut_rows].raf.to_numpy()
         beta_data = trait_data[cut_rows].rbeta.to_numpy()
@@ -337,7 +350,7 @@ rule plot_ML:
         p_thresh = float(wildcards.p_thresh)
         v_cutoff = stats.chi2.ppf(q=1-p_thresh, df=1)/trait_data.median_n_eff[0]
         cut_rows = np.array(trait_data.var_exp > v_cutoff) & np.array(trait_data.maf >= min_x)
-        cut_rows = cut_rows & np.array(trait_data.pval <= p_cutoffs[wildcards.p_thresh])
+        cut_rows = cut_rows & np.array(trait_data.pval <= p_cutoffs[thresh_to_key(wildcards.p_thresh)])
 
         trait_data = trait_data.iloc[cut_rows].reset_index().copy(deep=True)
         beta_hat = trait_data.rbeta.to_numpy()
@@ -449,7 +462,7 @@ rule plot_ll_ML:
         p_thresh = float(wildcards.p_thresh)
         v_cutoff = stats.chi2.ppf(q=1-p_thresh, df=1)/trait_data.median_n_eff[0]
         cut_rows = np.array(trait_data.var_exp > v_cutoff) & np.array(trait_data.maf >= min_x)
-        cut_rows = cut_rows & np.array(trait_data.pval <= p_cutoffs[wildcards.p_thresh])
+        cut_rows = cut_rows & np.array(trait_data.pval <= p_cutoffs[thresh_to_key(wildcards.p_thresh)])
 
         trait_data = trait_data.iloc[cut_rows].reset_index().copy(deep=True)
         beta_hat = trait_data.rbeta.to_numpy()
@@ -498,7 +511,7 @@ rule post_ll_ML:
         p_thresh = float(wildcards.p_thresh)
         v_cutoff = stats.chi2.ppf(q=1-p_thresh, df=1)/trait_data.median_n_eff[0]
         cut_rows = np.array(trait_data.var_exp > v_cutoff) & np.array(trait_data.maf >= min_x)
-        cut_rows = cut_rows & np.array(trait_data.pval <= p_cutoffs[wildcards.p_thresh])
+        cut_rows = cut_rows & np.array(trait_data.pval <= p_cutoffs[thresh_to_key(wildcards.p_thresh)])
 
         trait_data = trait_data.iloc[cut_rows].reset_index().copy(deep=True)
         beta_hat = trait_data.rbeta.to_numpy()

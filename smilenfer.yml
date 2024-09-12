@@ -1,4 +1,4 @@
-name: smilenfer-4
+name: smilenfer
 channels:
   - r
   - conda-forge
@@ -503,7 +503,6 @@ dependencies:
   - zlib=1.2.13=h166bdaf_4
   - zstd=1.5.2=h3eb15da_6
   - pip:
-    - fastdtwf==0.0.2
     - numpy==1.22.4
     - smilenfer==0.1
 prefix: /home/evan/miniconda3/envs/smilenfer-4

@@ -269,9 +269,7 @@ rule cut_points:
         trait_data = load_trait_data(input.data)
         nearest_genes = pd.read_csv(input.nearest_genes, sep="\t")
         trait_data = pd.merge(trait_data, nearest_genes, on=["chr", "pos"], how="left")
-
-        v_cutoff = smile_stats.calc_cutoffs_new(trait_data.var_exp.to_numpy(), trait_data.pval.to_numpy(), 
-                                                n_eff=trait_data.median_n_eff.to_numpy()[0])[wildcards.p_thresh]
+        v_cutoff = stats.chi2.ppf(q=1-p_thresh, df=1)/trait_data.median_n_eff[0]
         cut_rows = np.array(trait_data.var_exp > v_cutoff) & np.array(trait_data.maf >= min_x)
         cut_rows = cut_rows & np.array(trait_data.pval <= p_cutoffs[thresh_to_key(wildcards.p_thresh)])
 

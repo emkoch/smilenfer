@@ -1,2 +1,2 @@
 python setup.py sdist
-pip install --no-deps ./dist/smilenfer-0.1.tar.gz
+pip install --no-cache-dir --force-reinstall --no-deps ./dist/smilenfer-0.1.tar.gz

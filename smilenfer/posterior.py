@@ -325,3 +325,103 @@ def make_prior_sample(nsamp, RDS_fname):
     gg = base.readRDS(RDS_fname)
     sds_samp = np.random.choice(gg[2], nsamp, gg[0])
     return stats.norm.rvs(0, sds_samp)
+
+def prepare_data_from_opt_results(opt_results):
+    """
+    Prepares a DataFrame from the opt_results dictionary.
+
+    For each trait and for each sample, extracts the neutral log-likelihood 
+    and the likelihoods from the models. The models are mapped as follows:
+        - "I1_effects" -> "dir"
+        - "I2_effects" -> "stab"
+        - "Ip_effects" -> "plei"
+        - "full_effects" -> "full"
+
+    Parameters:
+        opt_results (dict): The dictionary of optimization results, with keys 
+                            for each trait and a list of results for each sample.
+
+    Returns:
+        pd.DataFrame: A DataFrame with one row per trait per sample and columns:
+            - trait: trait name
+            - sample: sample index
+            - ll_neut: neutral log-likelihood
+            - ll_dir: likelihood from I1_effects (mapped to "dir")
+            - ll_stab: likelihood from I2_effects (mapped to "stab")
+            - ll_plei: likelihood from Ip_effects (mapped to "plei")
+            - ll_full: likelihood from full_effects (mapped to "full")
+    """
+
+    rows = []
+    model_mapping = {
+        "I1_effects": "dir",
+        "I2_effects": "stab",
+        "Ip_effects": "plei",
+        "full_effects": "full",
+    }
+
+    for trait in sorted(opt_results.keys()):
+        results_list = opt_results[trait]
+        if not isinstance(results_list, list):
+            if isinstance(results_list, dict):
+                if "sample" not in results_list:
+                    results_list["sample"] = 0  # Give zero to show that no samples were run for this trait
+                results_list = [results_list]
+            else:
+                raise ValueError(f"Expected results_list to be a list or dict, got {type(results_list)}")
+        for result in results_list:
+            # Verify that all required keys are present
+            if "ll_neut" not in result:
+                warnings.warn(f"Result for trait '{trait}' is missing 'll_neut' key")
+            if not all(key in result for key in model_mapping.keys()):
+                missing_keys = [key for key in model_mapping.keys() if key not in result]
+                warnings.warn(f"Result for trait '{trait}' is missing keys: {', '.join(missing_keys)}")
+
+            row = {"trait": trait, "sample": result["sample"]}
+
+            # Neutral log-likelihood
+            row["ll_neut"] = result.get("ll_neut", np.nan)
+
+            # For each model, extract the likelihood value
+            for model_key, mapped_name in model_mapping.items():
+                good_entry = model_key in result and result[model_key] is not None and hasattr(result[model_key], 'fun')
+                row[f"ll_{mapped_name}"] = -result[model_key].fun if good_entry else np.nan
+                if model_key == "I1_effects":
+                    row["I1_dir"] = result[model_key].x[0] if good_entry else np.nan
+                elif model_key == "I2_effects":
+                    row["I2_stab"] = 10**result[model_key].x[0] if good_entry else np.nan
+                elif model_key == "Ip_effects":
+                    row["Ip_plei"] = 10**result[model_key].x[0] if good_entry else np.nan
+                elif model_key == "full_effects":
+                    row["I1_full"] = result[model_key].x[0] if good_entry else np.nan
+                    row["I2_full"] = 10**result[model_key].x[1] if good_entry else np.nan
+
+            rows.append(row)
+
+    df = pd.DataFrame(rows)
+    df = df.sort_values(by=["trait", "sample"]).reset_index(drop=True)
+    return df
+
+def prepare_data_from_ci_results(ci_results):
+    rows = []
+
+    model_mapping = {
+        "Ip_ci": "plei",
+        "I2_ci": "stab",
+        "I1_ci": "dir",
+    }
+
+    for trait in sorted(ci_results.keys()):
+        result = ci_results[trait]
+        print("working on", trait, result)
+        if not isinstance(result, dict):
+            raise ValueError(f"Expected result to be a dict, got {type(result)}")
+        row = {"trait": trait}
+        for model_key, _ in model_mapping.items():
+            row[model_key + "_lower"] = result[model_key][0]
+            row[model_key] = result[model_key][1]
+            row[model_key + "_upper"] = result[model_key][2]
+        rows.append(row)
+    df = pd.DataFrame(rows)
+    df = df.sort_values(by=["trait"]).reset_index(drop=True)
+    return df

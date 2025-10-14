@@ -1,5 +1,9 @@
 import numpy as np
 import scipy.stats as stats
+from scipy.optimize import minimize
+from scipy import sparse
+from scipy.sparse.linalg import spsolve
+import scipy.interpolate as interpolate
 from sklearn.linear_model import LinearRegression
 import pickle
 
@@ -2061,3 +2065,644 @@ def posterior_median_plei_WF(raf_set, beta_set, Ip, Ne, WF_pile, n_s=200):
         median_S_x = S_expand[np.nanargmax(np.logical_not(np.cumsum(x_find_weights)/np.sum(x_find_weights) < 0.5))]
         S_ud_medians[ii] = median_S_x
     return S_ud_medians
+
+##############################################
+### Inference functions using optimization ###
+##############################################
+
+def filter_vars_vcutoff(raf, beta, v_cutoff, beta_obs=None):
+    # filter variants where rbeta < sqrt(v_cutoff/(raf * (1 - raf)))
+    # and raf > 0.01
+    # convert to numpy arrays
+    raf_tmp = np.array(raf).copy()
+    beta_tmp = np.array(beta).copy()
+    beta_obs_tmp = np.array(beta_obs).copy() if beta_obs is not None else beta_tmp.copy()
+    mask = np.abs(beta_obs_tmp) > np.sqrt(v_cutoff / (2*(raf_tmp * (1 - raf_tmp))))
+    return raf_tmp[mask].copy(), beta_tmp[mask].copy(), beta_obs_tmp[mask].copy() if beta_obs is not None else None
+
+def build_integration_grid(sfs_pile, min_x=0.01, n_points=1000, n_S_ud=999, n_S_p=5000, ud=True):
+    """Builds and returns the SFS grid for pleiotropic stabilizing selection."""
+    global_x = trad_x_set(min_x, n_points)
+    S_ud = np.logspace(-3, 3, n_S_ud)
+    if ud:
+        tau = sim.sfs_ud_WF_grid(S_ud, sfs_pile, x_set=global_x)
+    else:
+        tau = sim.sfs_dir_WF_grid(-S_ud / 2, sfs_pile, x_set=global_x)
+    S_p = np.logspace(-3, 5, n_S_p)
+    int_grid = np.zeros((len(S_p), len(global_x)))
+    for i, s in enumerate(S_p):
+        dens   = sim.levy_density(S_ud, s)
+        low_m  = sim.levy_cdf(S_ud[0], s)
+        high_m = 1 - sim.levy_cdf(S_ud[-1], s)
+        grid_val = np.trapz(dens * tau, S_ud)
+        grid_val += low_m * tau[:, 0]
+        grid_val += high_m * tau[:, -1]
+        int_grid[i] = grid_val
+    return global_x, S_ud, tau, S_p, int_grid
+
+def build_integration_grid_dir(sfs_pile, min_x=0.01, n_points=1000):
+    global_x = trad_x_set(min_x, n_points)
+
+    # positive selection on trait-increasing variants
+    SS_1 = np.logspace(-3, 3, 999)
+    tau_tid = sim.sfs_dir_WF_grid(SS_1, sfs_pile, x_set=global_x)
+    tau_tia = sim.sfs_dir_WF_grid(-SS_1, sfs_pile, x_set=global_x)
+    pi_set = sim.pi_dir_db(SS_1)
+    tau_1 = tau_tid * pi_set + np.flip(tau_tia, axis=0) * (1 - pi_set)
+
+    # negative selection on trait-increasing variants
+    SS_2 = np.flip(-SS_1, axis=0)
+    tau_tid = sim.sfs_dir_WF_grid(SS_2, sfs_pile, x_set=global_x)
+    tau_tia = sim.sfs_dir_WF_grid(-SS_2, sfs_pile, x_set=global_x)
+    pi_set = sim.pi_dir_db(SS_2)
+    tau_2 = tau_tid * pi_set + np.flip(tau_tia, axis=0) * (1 - pi_set)
+
+    # concatenate the two sets of sfs
+    tau = np.concatenate((tau_2, tau_1), axis=1)
+    SS = np.concatenate((SS_2, SS_1), axis=0)
+
+    return global_x, SS, tau
+
+def build_integration_grid_s(sfs_pile, min_x=0.01, n_points=1000):
+    global_x = trad_x_set(min_x, n_points)
+    SS = -np.logspace(-3, 3, 999)
+    tau = sim.sfs_dir_WF_grid(SS, sfs_pile, x_set=global_x)
+    return global_x, -SS, tau
+
+def build_simple_grid(sfs_pile, min_x=0.01, n_points=1000):
+    global_x = trad_x_set(min_x, n_points)
+    S_ud = np.logspace(-3, 3, 999)
+    tau = sim.sfs_ud_WF_grid(S_ud, sfs_pile, x_set=global_x)
+    return global_x, S_ud, tau
+
+def sfs_interp(int_grid, S_p_set, s_val):
+    """Interpolates the precomputed SFS at a given physical selection coefficient s_val."""
+    S_p_set = S_p_set
+    _s_val = np.clip(s_val, S_p_set[0], S_p_set[-1])
+    idx = np.searchsorted(S_p_set, _s_val)
+    idx = np.clip(idx, 1, len(S_p_set) - 1)
+    x0 = S_p_set[idx - 1]
+    x1 = S_p_set[idx]
+    y0 = int_grid[idx - 1, :]
+    y1 = int_grid[idx, :]
+    return y0 + (y1 - y0) / (x1 - x0) * (_s_val - x0)
+
+def variant_ll(global_x, int_grid, S_p_set, s_val, raf, beta, v_cutoff, min_x, n_x, d_x=None):
+    """Computes the log likelihood for a single variant."""
+    if d_x is None:
+        d_x = np.maximum(discov_x(beta, v_cutoff), min_x)
+    sfs_vals = sfs_interp(int_grid, S_p_set, s_val)
+    x_adj = adjusted_x_set(d_x, 10, n_x)
+    sfs_adj_tia = np.interp(x_adj, global_x, sfs_vals)
+    sfs_adj_tid = np.interp(1 - x_adj, global_x, sfs_vals)
+    Z = np.trapz(0.5 * (sfs_adj_tia + sfs_adj_tid), x_adj)
+    tid = np.interp(raf, global_x, sfs_vals)
+    tia = np.interp(1 - raf, global_x, sfs_vals)
+    # if tia / tid are nan, return -inf
+    if tia + tid == 0:
+        return -np.inf
+    return np.log(0.5) + np.log(tid + tia) - np.log(Z)
+
+def variant_ll_dir(global_x, int_grid, SS_set, s_val, raf, beta, v_cutoff, min_x, n_x, d_x=None):
+    """Computes the log likelihood for a single variant under directional selection."""
+    if d_x is None:
+        d_x = np.maximum(discov_x(beta, v_cutoff), min_x)
+    sfs_vals = sfs_interp(int_grid, SS_set, s_val)
+    x_adj = adjusted_x_set(d_x, 10, n_x)
+    sfs_adj = np.interp(x_adj, global_x, sfs_vals)
+    Z = np.trapz(sfs_adj, x_adj)
+    numerator = np.interp(raf, global_x, sfs_vals)
+    if numerator == 0:
+        return -np.inf
+    return np.log(numerator) - np.log(Z)
+
+def variant_ll_full(sfs_pile, S_val, S_ud_val, raf, beta, v_cutoff, min_x, n_x, d_x=None):
+    """Computes the log likelihood for a single variant under full model."""
+    if d_x is None: 
+        d_x = np.maximum(discov_x(beta, v_cutoff), min_x)
+    x_adj = adjusted_x_set(d_x, 10, n_x)
+
+    pi = sim.pi_dir_db(S_val)
+    sfs_tid = sim.sfs_full_WF_grid([S_val], [S_ud_val], sfs_pile, x_set=x_adj)[:,0]
+    sfs_tia = sim.sfs_full_WF_grid([-S_val], [S_ud_val], sfs_pile, x_set=x_adj)[:,0]
+    sfs = sfs_tid * pi + np.flip(sfs_tia) * (1 - pi)
+    Z = np.trapz(sfs, x_adj)
+    numerator = np.interp(raf, x_adj, sfs)
+    if numerator == 0:
+        return -np.inf
+    result = np.log(numerator) - np.log(Z)
+    if np.isnan(result):
+        # Do an autopsy and raise an error if we get a NaN
+        print(f"Warning: NaN encountered in variant_ll_full.")
+        print(f"numerator: {numerator}, Z: {Z}")
+        print(f"  S_val: {S_val}, S_ud_val: {S_ud_val}, raf: {raf}, beta: {beta}, d_x: {d_x}")
+        print(f"  sfs_tid: {sfs_tid}, sfs_tia: {sfs_tia}, pi:{pi}")
+    return result
+
+def total_ll(global_x, int_grid, S_p_set, Ne, beta, raf, v_cutoff, min_x, n_x, II=0, ss=None, rr=None, d_x_set=None):
+    """Sums the log likelihood over all variants."""
+    if ss is None:
+        if rr is None:
+            S_p_vals = 2 * Ne * beta**2 * II
+        else:
+            S_p_vals = 2 * Ne * beta**rr * II
+    else:
+        S_p_vals = 2 * Ne * ss * np.ones_like(beta)
+    ll = 0.0
+    for i in range(len(raf)):
+        var_ll = variant_ll(global_x, int_grid, S_p_set, S_p_vals[i],
+                            raf[i], beta[i], v_cutoff, min_x, n_x, 
+                            d_x_set[i] if d_x_set is not None else None)
+        
+        if np.isnan(var_ll):
+            print(f"Warning: variant {i} has invalid log likelihood.")
+            print(f"  raf: {raf[i]}, beta: {beta[i]}, d_x:{d_x_set[i] if d_x_set is not None else None}")
+            raise ValueError("Invalid log likelihood encountered.")
+        
+        if np.isneginf(var_ll):
+            return -np.inf
+        
+        ll += var_ll
+    return ll
+
+def total_ll_dir(global_x, int_grid, SS_set, Ne, beta, raf, v_cutoff, min_x, n_x, I1=0, d_x_set=None):
+    """Sums the log likelihood over all variants."""
+    S_p_vals = 2 * Ne * beta * I1
+    ll = 0.0
+    for i in range(len(raf)):
+        var_ll = variant_ll_dir(global_x, int_grid, SS_set, S_p_vals[i],
+                             raf[i], beta[i], v_cutoff, min_x, n_x, 
+                             d_x_set[i] if d_x_set is not None else None)
+        if np.isnan(var_ll):
+            print(f"Warning: variant {i} has invalid log likelihood.")
+            print(f"  raf: {raf[i]}, beta: {beta[i]}, d_x:{d_x_set[i] if d_x_set is not None else None}")
+            raise ValueError("Invalid log likelihood encountered.")
+        if np.isneginf(var_ll):
+            return -np.inf
+        ll += var_ll
+    return ll
+
+def total_ll_full(SFS_pile, Ne, beta, raf, v_cutoff, min_x, n_x, I1=0, I2=0, d_x_set=None):
+    S_ud_vals = 2 * Ne * beta**2 * I2
+    S_vals = 2 * Ne * beta * I1
+    ll = 0.0
+    for i in range(len(raf)):
+        var_ll = variant_ll_full(SFS_pile, S_vals[i], S_ud_vals[i],
+                                 raf[i], beta[i], v_cutoff, min_x, n_x,
+                                 d_x_set[i] if d_x_set is not None else None)
+        if np.isnan(var_ll):
+            print(f"Warning: variant {i} has invalid log likelihood.")
+            print(f"  raf: {raf[i]}, beta: {beta[i]},S_ud:{S_ud_vals[i]}, S:{S_vals[i]}, d_x:{d_x_set[i] if d_x_set is not None else None}")
+            raise ValueError("Invalid log likelihood encountered.")
+        if np.isneginf(var_ll):
+            return -np.inf
+        ll += var_ll
+        
+    return ll
+
+def llhood_s(sfs_pile, Ne, raf, beta, v_cutoff, ss, min_x=0.01, n_points=1000, n_x=1000, beta_obs=None):
+    ss = np.abs(ss)
+    # check for NaN in raf, beta and raise ValueError
+    if np.any(np.isnan(raf)) or np.any(np.isnan(beta)):
+        raise ValueError("raf and beta must not contain NaN values (initial)")
+    raf, beta, beta_obs = filter_vars_vcutoff(raf, beta, v_cutoff, beta_obs)
+    d_x_set = np.maximum(discov_x(beta if beta_obs is None else beta_obs, v_cutoff), min_x)
+    # DIAGNOSE any nan values in d_x_set
+    if np.any(np.isnan(d_x_set)):
+        # show the offending points
+        print("d_x_set contains NaN values (induced by filter_vars_vcutoff)")
+        print(f"raf: {raf[np.isnan(d_x_set)]}")
+        print(f"beta: {beta[np.isnan(d_x_set)]}")
+        print(f"v_cutoff: {v_cutoff}")
+        print(f"beta_obs: {beta_obs[np.isnan(d_x_set)] if beta_obs is not None else None}")
+        raise ValueError("d_x_set contains NaN values (induced by filter_vars_vcutoff)")
+    
+    # check for NaN in raf or beta and raise ValueError
+    if np.any(np.isnan(raf)) or np.any(np.isnan(beta)):
+        raise ValueError("raf and beta must not contain NaN values (induced by filter_vars_vcutoff)")
+
+    global_x, SS, tau = build_integration_grid_s(sfs_pile, min_x, n_points)
+    return total_ll(global_x, tau.T, SS, Ne, beta, raf, v_cutoff, min_x, n_x, ss=ss, d_x_set=d_x_set)
+
+def infer_I2(sfs_pile, Ne, raf, beta, v_cutoff, min_x=0.01, n_points=1000, n_x=1000, beta_obs=None, x0=-2, ud=True):
+    """
+    Puts everything together: builds the grids and performs MLE inference for I_2.
+    Returns the OptimizeResult from scipy.optimize.minimize.
+    """
+    if ud:
+        global_x, S_ud, tau = build_simple_grid(sfs_pile, min_x, n_points)
+    else:
+        global_x, S_ud, tau = build_integration_grid_s(sfs_pile, min_x, n_points)
+        S_ud = S_ud * 2
+    raf, beta, beta_obs = filter_vars_vcutoff(raf, beta, v_cutoff, beta_obs)
+    d_x_set = np.maximum(discov_x(beta if beta_obs is None else beta_obs, v_cutoff), min_x)
+    
+    def neg_ll(log10_I2):
+        return -total_ll(global_x, tau.T, S_ud, Ne, beta, raf, v_cutoff, min_x, n_x, 10**log10_I2, d_x_set=d_x_set)
+    
+    res = minimize(neg_ll, x0=x0, bounds=[(-8,2)], method="Nelder-Mead")
+    
+    return res
+
+def infer_Ip(sfs_pile, Ne, raf, beta, v_cutoff, 
+             min_x=0.01, n_points=1000, n_x=1000, beta_obs=None, x0=-3, ud=True):
+    """
+    Puts everything together: builds the grids and performs MLE inference for I_p.
+    Returns the OptimizeResult from scipy.optimize.minimize.
+    """ 
+    global_x, _, _, S_p, int_grid = build_integration_grid(sfs_pile, min_x, n_points, ud=ud)
+
+    raf, beta, beta_obs = filter_vars_vcutoff(raf, beta, v_cutoff, beta_obs)
+    d_x_set = np.maximum(discov_x(beta if beta_obs is None else beta_obs, v_cutoff), min_x)
+    
+    def neg_ll(log10_Ip):
+        return -total_ll(global_x, int_grid, S_p, Ne, beta, raf, v_cutoff, min_x, n_x, 10**log10_Ip, d_x_set=d_x_set)
+    
+    max_bound = np.log10(S_p[-1] / (2 * Ne * np.median(beta**2)))
+    res = minimize(neg_ll, x0=x0, bounds=[(-8, max_bound)], method="Nelder-Mead")
+    return res
+
+def infer_I1(sfs_pile, Ne, raf, beta, v_cutoff, min_x=0.01, n_points=1000, n_x=1000, beta_obs=None):
+    global_x, SS, tau = build_integration_grid_dir(sfs_pile, min_x, n_points)
+    raf, beta, beta_obs = filter_vars_vcutoff(raf, beta, v_cutoff, beta_obs)
+    d_x_set = np.maximum(discov_x(beta if beta_obs is None else beta_obs, v_cutoff), min_x)
+    def neg_ll(I1):
+        return -total_ll_dir(global_x, tau.T, SS, Ne, beta, raf, v_cutoff, min_x, n_x, I1=I1, d_x_set=d_x_set)
+    res = minimize(neg_ll, x0=0, bounds=[(-10, 10)], method="Nelder-Mead")
+    return res
+
+def infer_full(sfs_pile, Ne, raf, beta, v_cutoff, min_x=0.01, n_x=1000, beta_obs=None):
+    raf, beta, beta_obs = filter_vars_vcutoff(raf, beta, v_cutoff, beta_obs)
+    d_x_set = np.maximum(discov_x(beta if beta_obs is None else beta_obs, v_cutoff), min_x)
+    def neg_ll(I1I2):
+        I1, logI2 = I1I2
+        return -total_ll_full(sfs_pile, Ne, beta, raf, v_cutoff, min_x, n_x, I1=I1, I2=10**logI2, d_x_set=d_x_set)
+    res = minimize(neg_ll, x0=[0, -2], bounds=[(-10, 10), (-8, 2)], method="Nelder-Mead")
+    return res
+
+def infer_all_standard(sfs_pile, Ne, raf, beta, v_cutoff, min_x=0.01, n_points=1000, n_x=1000, beta_obs=None):
+    """
+    Puts everything together: builds the grids and performs MLE inference for all models.
+    Returns a dictionary with the results.
+    """
+    results = {}
+    results["ll_neut"] = llhood_s(sfs_pile, Ne, raf, beta, v_cutoff, 1e-9, 
+                                  min_x=min_x, n_points=n_points, n_x=n_x, beta_obs=beta_obs)
+    results["I2_effects"]   = infer_I2(sfs_pile, Ne, raf, beta, v_cutoff, min_x=min_x, n_points=n_points, n_x=n_x, beta_obs=beta_obs)
+    results["Ip_effects"]   = infer_Ip(sfs_pile, Ne, raf, beta, v_cutoff, min_x=min_x, n_points=n_points, n_x=n_x, beta_obs=beta_obs)
+    results["I1_effects"]   = infer_I1(sfs_pile, Ne, raf, beta, v_cutoff, min_x=min_x, n_points=n_points, n_x=n_x, beta_obs=beta_obs)
+    results["full_effects"] = infer_full(sfs_pile, Ne, raf, beta, v_cutoff, min_x=min_x, n_x=n_x, beta_obs=beta_obs)
+    return results
+
+
+def case_deletion_deviation(sfs_pile, Ne, raf, beta, v_cutoff, model="I2", min_x=0.01, 
+                            n_points=1000, n_x=1000, beta_obs=None):
+    deviance = np.zeros_like(raf, dtype=float)
+    full_fit = None
+    _local_infer_Ip_func = None
+    _local_llhood_Ip_func = None
+    if model == "I2":
+        full_fit = infer_I2(sfs_pile, Ne, raf, beta, v_cutoff, min_x=min_x, n_points=n_points, n_x=n_x, beta_obs=beta_obs)
+    elif model == "Ip":
+        _cached_global_x, _, _, _cached_S_p, _cached_int_grid = build_integration_grid(sfs_pile, min_x, n_points, n_S_p=50000, n_S_ud=999)
+        def _local_infer_Ip_optimized(param_Ne, param_raf, param_beta, param_v_cutoff, 
+                                      param_min_x, param_n_x, param_beta_obs, param_x0):
+
+            current_raf, current_beta, current_beta_obs = filter_vars_vcutoff(param_raf, param_beta, param_v_cutoff, param_beta_obs)
+            current_d_x_set = np.maximum(discov_x(current_beta if current_beta_obs is None else current_beta_obs, param_v_cutoff), param_min_x)
+            
+            def neg_ll(log10_Ip):
+                return -total_ll(_cached_global_x, _cached_int_grid, _cached_S_p, 
+                                 param_Ne, current_beta, current_raf, param_v_cutoff, 
+                                 param_min_x, param_n_x, 10**log10_Ip, d_x_set=current_d_x_set)
+            
+            max_bound_val = -1.0
+            if len(_cached_S_p) > 0 and param_Ne > 0 and len(current_beta) > 0:
+                median_beta_sq = np.median(current_beta**2)
+                if median_beta_sq > 0:
+                    denominator = 2 * param_Ne * median_beta_sq
+                    if denominator > 0:
+                         max_bound_val = np.log10(_cached_S_p[-1] / denominator)
+
+            actual_bounds = [(-8, max_bound_val if max_bound_val > -8 else -7.9)] 
+
+            res = minimize(neg_ll, x0=param_x0, bounds=actual_bounds, method="Nelder-Mead")
+            return res
+        
+        _local_infer_Ip_func = _local_infer_Ip_optimized
+
+        def _local_llhood_Ip_optimized(param_Ne, param_raf, param_beta, param_v_cutoff, param_Ip,
+                                       param_min_x, param_n_x, param_beta_obs):
+
+            current_raf, current_beta, current_beta_obs = filter_vars_vcutoff(param_raf, param_beta, param_v_cutoff, param_beta_obs)
+            current_d_x_set = np.maximum(discov_x(current_beta if current_beta_obs is None else current_beta_obs, param_v_cutoff), param_min_x)
+
+            return total_ll(_cached_global_x, _cached_int_grid, _cached_S_p, 
+                            param_Ne, current_beta, current_raf, param_v_cutoff, 
+                            param_min_x, param_n_x, II=np.abs(param_Ip), d_x_set=current_d_x_set)
+
+        _local_llhood_Ip_func = _local_llhood_Ip_optimized
+        full_fit = _local_infer_Ip_func(Ne, raf, beta, v_cutoff, 
+                                        min_x, n_x, beta_obs, param_x0=-3)
+    else:
+        raise ValueError("model must be either 'I2' or 'Ip', others not yet implemented here")
+    
+    x0=full_fit.x
+    n = len(raf)
+    for i in range(n):
+        if ((i + 1) % 10 == 0) or (i + 1 == n):
+            percent = int(100 * (i + 1) / n)
+            print(f"\rLeave-one-out progress: {i + 1}/{n} ({percent}%)", end="", flush=True)
+        raf_tmp = np.delete(raf, i)
+        beta_tmp = np.delete(beta, i)
+        if model == "I2":
+            fit = infer_I2(sfs_pile, Ne, raf_tmp, beta_tmp, v_cutoff, 
+                           min_x=min_x, n_points=n_points, n_x=n_x, beta_obs=beta_obs, x0=x0)
+            ll_full_tmp = -llhood_I2(sfs_pile, Ne, raf, beta, v_cutoff, 10**fit.x[0], 
+                                     min_x=min_x, n_points=n_points, n_x=n_x, beta_obs=beta_obs)
+        elif model == "Ip":
+            fit = _local_infer_Ip_func(Ne, raf_tmp, beta_tmp, v_cutoff,
+                                              min_x, n_x, beta_obs, param_x0=x0)
+            if hasattr(fit, 'success') and fit.success and hasattr(fit, 'x'):
+                ll_full_tmp = -_local_llhood_Ip_func(Ne, raf, beta, v_cutoff, 10**fit.x[0],
+                                                     min_x, n_x, beta_obs)
+                
+        _fit_fun_val = getattr(fit, 'fun', np.nan) if fit else np.nan
+        _full_fit_fun_val = getattr(full_fit, 'fun', np.nan)
+
+        if np.isnan(ll_full_tmp) or np.isnan(_full_fit_fun_val):
+             deviance[i] = np.nan
+        else:
+            deviance[i] = 2 * (ll_full_tmp - _full_fit_fun_val)
+
+        if np.isnan(deviance[i]):
+            print(f"Warning: variant {i} has invalid model fit.")  
+            print(f"  raf: {raf[i]}, beta: {beta[i]}")
+            raise ValueError("Invalid model fit encountered.")
+    return deviance
+
+def bootstrap_I2(sfs_pile, Ne, raf, beta, v_cutoff, 
+                 min_x=0.01, n_points=1000, n_x=1000, beta_obs=None, 
+                 n_boot=1000, ud=True, seed=None):
+    rng = (np.random.default_rng(seed) if seed is not None
+           else np.random.default_rng())
+    
+    raf, beta, beta_obs = filter_vars_vcutoff(raf, beta, v_cutoff, beta_obs)
+    
+    if ud:
+        global_x, S_ud, tau = build_simple_grid(sfs_pile, min_x, n_points)
+    else:
+        global_x, S_ud, tau = build_integration_grid_s(sfs_pile, min_x, n_points)
+
+    # Run inital optimization fit
+    d_x_set = np.maximum(discov_x(beta if beta_obs is None else beta_obs, v_cutoff), min_x)
+    def neg_ll(log10_I2):
+        return -total_ll(global_x, tau.T, S_ud, Ne, beta, raf, v_cutoff, 
+                         min_x, n_x, 10**log10_I2, d_x_set=d_x_set)
+
+    full_res = minimize(neg_ll, x0=-2, bounds=[(-8, 2)], method="Nelder-Mead")
+    mle_I2  = 10.0**full_res.x[0]
+    boot_est = np.empty(n_boot)
+    boot_fits = []
+
+    for ii in range(n_boot):
+        print(f"Bootstrap iteration {ii+1}/{n_boot} ...", end="\r")
+        idx = rng.integers(0, len(raf), size=len(raf))
+        def neg_ll(log10_I2):
+            return -total_ll(global_x, tau.T, S_ud, Ne, beta[idx], raf[idx], v_cutoff, 
+                             min_x, n_x, 10**log10_I2, d_x_set=d_x_set[idx])
+        boot_res = minimize(neg_ll, x0=np.log10(mle_I2) - np.log10(2), 
+                            bounds=[(-8, 2)], method="Nelder-Mead")
+        boot_fits.append(boot_res)
+        boot_est[ii] = 10.0**boot_res.x[0]
+
+    lo = np.percentile(boot_est, 2.5)
+    hi = np.percentile(boot_est, 97.5)
+
+    return boot_fits, boot_est, (lo, np.nanmedian(boot_est), hi)
+
+def bootstrap_Ip(sfs_pile, Ne, raf, beta, v_cutoff, 
+                min_x=0.01, n_points=1000, n_x=1000, beta_obs=None, n_boot=1000, ud=True, seed=None):
+    rng = (np.random.default_rng(seed) if seed is not None
+           else np.random.default_rng())
+    
+    raf, beta, beta_obs = filter_vars_vcutoff(raf, beta, v_cutoff, beta_obs)
+    global_x, _, _, S_p, int_grid = build_integration_grid(sfs_pile, min_x, n_points, ud=ud)
+
+    d_x_set = np.maximum(discov_x(beta if beta_obs is None else beta_obs, v_cutoff), min_x)
+
+    def neg_ll(log10_Ip):
+        return -total_ll(global_x, int_grid, S_p, Ne, beta, raf, v_cutoff, 
+                         min_x, n_x, 10**log10_Ip, d_x_set=d_x_set)
+
+    max_bound = np.log10(S_p[-1] / (2 * Ne * np.median(beta**2)))
+    full_res = minimize(neg_ll, x0=-3, bounds=[(-8, max_bound)], method="Nelder-Mead")
+
+    mle_Ip = 10.0**full_res.x[0]
+    
+    boot_est = np.empty(n_boot)
+    boot_fits = []
+
+    for ii in range(n_boot):
+        print(f"Bootstrap iteration {ii+1}/{n_boot} ...", end="\r")
+        idx = rng.integers(0, len(raf), size=len(raf))
+        def neg_ll(log10_Ip):
+            return -total_ll(global_x, int_grid, S_p, Ne, beta[idx], raf[idx], v_cutoff, 
+                             min_x, n_x, 10**log10_Ip, d_x_set=d_x_set[idx])
+        boot_res = minimize(neg_ll, x0=np.log10(mle_Ip) - np.log10(2), 
+                            bounds=[(-8, max_bound)], method="Nelder-Mead")
+        boot_fits.append(boot_res)
+        boot_est[ii] = 10.0**boot_res.x[0]
+
+    lo = np.percentile(boot_est, 2.5)
+    hi = np.percentile(boot_est, 97.5)
+
+    return boot_fits,boot_est, (lo, np.nanmedian(boot_est), hi)
+
+def bootstrap_I1(sfs_pile, Ne, raf, beta, v_cutoff, 
+                 min_x=0.01, n_points=1000, n_x=1000, beta_obs=None, 
+                 n_boot=1000, seed=None):
+    rng = (np.random.default_rng(seed) if seed is not None
+           else np.random.default_rng())
+    
+    raf, beta, beta_obs = filter_vars_vcutoff(raf, beta, v_cutoff, beta_obs)
+
+    global_x, SS, tau = build_integration_grid_dir(sfs_pile, min_x, n_points)
+
+    # Run initial optimization fit
+    d_x_set = np.maximum(discov_x(beta if beta_obs is None else beta_obs, v_cutoff), min_x)
+    def neg_ll(I1):
+        return -total_ll_dir(global_x, tau.T, SS, Ne, beta, raf, v_cutoff, 
+                             min_x, n_x, I1=I1, d_x_set=d_x_set)
+    full_res = minimize(neg_ll, x0=0, bounds=[(-10, 10)], method="Nelder-Mead")
+    mle_I1 = full_res.x[0]
+
+    boot_est = np.empty(n_boot)
+    boot_fits = []
+    for ii in range(n_boot):
+        print(f"Bootstrap iteration {ii+1}/{n_boot} ...", end="\r")
+        idx = rng.integers(0, len(raf), size=len(raf))
+        def neg_ll(I1):
+            return -total_ll_dir(global_x, tau.T, SS, Ne, beta[idx], raf[idx], v_cutoff, 
+                                        min_x, n_x, I1=I1, d_x_set=d_x_set[idx])
+        boot_res = minimize(neg_ll, x0=mle_I1, bounds=[(-10, 10)], method="Nelder-Mead")
+        boot_fits.append(boot_res)
+        boot_est[ii] = boot_res.x[0]
+
+    lo = np.percentile(boot_est, 2.5)
+    hi = np.percentile(boot_est, 97.5)
+
+    return boot_fits, boot_est, (lo, np.nanmedian(boot_est), hi)
+
+
+def whittaker(y, lam=1e7, w=None):
+    n = y.size
+    E = sparse.eye(n, format="csc")
+    D = E[2:] - 2*E[1:-1] + E[:-2]          # second difference
+    W = sparse.diags(w, 0) if w is not None else E
+    z = spsolve(W + lam * (D.T @ D), W @ y)
+    return z
+
+def wald_ci_Ip(sfs_pile, Ne, raf, beta, v_cutoff, Ip_mle, min_x=0.01, n_points=1000, n_x=1000, beta_obs=None, 
+               hh=1.0, alpha=0.05, spline=False, name=None, log_param=True):
+    raf, beta, beta_obs = filter_vars_vcutoff(raf, beta, v_cutoff, beta_obs)
+    d_x_set = np.maximum(discov_x(beta if beta_obs is None else beta_obs, v_cutoff), min_x)
+    global_x, _, _, S_p, int_grid = build_integration_grid(sfs_pile, min_x, n_points)
+    log_Ip_mle = np.log10(Ip_mle)
+
+    def llfun(log_Ip):
+        return total_ll(global_x, int_grid, S_p, Ne, beta, raf, v_cutoff, min_x, n_x,
+                        II=10**log_Ip, d_x_set=d_x_set)
+    def llfun_linparam(Ip):
+        return llfun(np.log10(Ip))
+
+    if spline:
+        llfun = np.vectorize(llfun, otypes=[float])
+        llfun_linparam = np.vectorize(llfun_linparam, otypes=[float])
+
+        Ip_set = np.logspace(np.log10(Ip_mle) - 2*hh, np.log10(Ip_mle) + 2*hh, 200)
+        ll_values = llfun(np.log10(Ip_set))
+        finite_set = np.isfinite(ll_values)
+        Ip_set = Ip_set[finite_set]
+        ll_values = ll_values[finite_set]
+        smoothed_ll_values = whittaker(ll_values, lam=10)
+        log_spline = interpolate.UnivariateSpline(np.log10(Ip_set), smoothed_ll_values, s=0, k=3)
+        lin_spline = interpolate.UnivariateSpline(Ip_set, smoothed_ll_values, s=0, k=3)
+        fisher_info = -log_spline.derivatives(np.log10(Ip_mle))[2]
+        fisher_info_lin = -lin_spline.derivatives(Ip_mle)[2]
+        print(fisher_info)
+        if fisher_info <= 0:
+            raise ValueError("Fisher information is non-positive, cannot compute Wald CI.")
+        se_log = np.sqrt(1 / fisher_info)
+        z = stats.norm.ppf(1.0 - alpha / 2.0)
+        ci_log = (log_Ip_mle - z*se_log, log_Ip_mle, log_Ip_mle + z*se_log)
+        ci_nat = (10**ci_log[0], 10**ci_log[1], 10**ci_log[2])
+
+        if fisher_info_lin <= 0:
+            raise ValueError("Fisher information is non-positive, cannot compute Wald CI.")
+        se_lin = np.sqrt(1 / fisher_info_lin)
+        ci_lin = (Ip_mle - z*se_lin, Ip_mle, Ip_mle + z*se_lin)
+    else:
+        fisher_info = (llfun(log_Ip_mle + 2*hh) - 16 * llfun(log_Ip_mle + hh)
+                       + 30 * llfun(log_Ip_mle) - 16 * llfun(log_Ip_mle - hh)
+                       + llfun(log_Ip_mle - 2*hh)) / (12 * hh**2)
+        print(fisher_info)
+        if fisher_info <= 0:
+            raise ValueError("Fisher information is non-positive, cannot compute Wald CI.")
+
+    se_log = np.sqrt(1 / fisher_info)
+    z = stats.norm.ppf(1.0 - alpha / 2.0)
+    ci_log = (log_Ip_mle - z*se_log, log_Ip_mle, log_Ip_mle + z*se_log)
+    ci_nat = (10**ci_log[0], 10**ci_log[1], 10**ci_log[2])
+
+    if ci_nat[0] < 0 or ci_nat[2] < 0:
+        raise ValueError("Wald CI contains negative values, which is invalid for I_p.")
+    return ci_nat
+
+def wald_ci_I2(sfs_pile, Ne, raf, beta, v_cutoff, I2_mle, min_x=0.01, n_points=2000, n_x=2000, beta_obs=None,
+                hh=1.0, alpha=0.05, spline=False, name=None):
+    raf, beta, beta_obs = filter_vars_vcutoff(raf, beta, v_cutoff, beta_obs)
+    d_x_set = np.maximum(discov_x(beta if beta_obs is None else beta_obs, v_cutoff), min_x)
+    global_x, S_ud, tau = build_simple_grid(sfs_pile, min_x, n_points)
+    log_I2_mle = np.log10(I2_mle)
+    def llfun(log_I2):
+        return total_ll(global_x, tau.T, S_ud, Ne, beta, raf, v_cutoff, min_x, n_x, II=10**log_I2, d_x_set=d_x_set)
+    if spline:
+        llfun = np.vectorize(llfun, otypes=[float])
+        I2_set = np.logspace(np.log10(I2_mle) - 2*hh, np.log10(I2_mle) + 2*hh, 200)
+        ll_values = llfun(np.log10(I2_set))
+        finite_set = np.isfinite(ll_values)
+        I2_set = I2_set[finite_set]
+        ll_values = ll_values[finite_set]
+        # Fit a spline to the log-likelihood values
+        smoothed_ll_values = whittaker(ll_values, lam=10)
+        log_spline = interpolate.UnivariateSpline(np.log10(I2_set), smoothed_ll_values, s=0, k=3)
+        fisher_info = -log_spline.derivatives(np.log10(I2_mle))[2]
+        print(fisher_info)
+        if fisher_info <= 0:
+            raise ValueError("Fisher information is non-positive, cannot compute Wald CI.")
+        
+        se_log = np.sqrt(1 / fisher_info)
+        z = stats.norm.ppf(1.0 - alpha / 2.0)
+        ci_log = (log_I2_mle - z*se_log,
+                log_I2_mle,
+                log_I2_mle + z*se_log)
+        ci_nat = (10**ci_log[0], 10**ci_log[1], 10**ci_log[2])
+        # Check if the CI is valid
+        if ci_nat[0] < 0 or ci_nat[2] < 0:
+            raise ValueError("Wald CI contains negative values, which is invalid for I_2.")
+    else:
+        fisher_info = (llfun(log_I2_mle + 2*hh) - 16 * llfun(log_I2_mle + hh) + 30 * llfun(log_I2_mle) - 16 * llfun(log_I2_mle - hh) + llfun(log_I2_mle - 2*hh))
+        fisher_info /= (12 * hh**2)
+        print(fisher_info)
+        if fisher_info <= 0:
+            raise ValueError("Fisher information is non-positive, cannot compute Wald CI.")
+    se_log = np.sqrt(1 / fisher_info)
+    z = stats.norm.ppf(1.0 - alpha / 2.0)
+    ci_log = (log_I2_mle - z*se_log,
+            log_I2_mle,
+            log_I2_mle + z*se_log)
+    ci_nat = (10**ci_log[0], 10**ci_log[1], 10**ci_log[2])
+    # Check if the CI is valid
+    if ci_nat[0] < 0 or ci_nat[2] < 0:
+        raise ValueError("Wald CI contains negative values, which is invalid for I_2.")
+    return ci_nat
+
+def wald_ci_I1(sfs_pile, Ne, raf, beta, v_cutoff, I1_mle, min_x=0.01, n_points=1000, n_x=1000,
+               beta_obs=None, hh=1.0, alpha=0.05, spline=False, name=None):
+    raf, beta, beta_obs = filter_vars_vcutoff(raf, beta, v_cutoff, beta_obs)
+    d_x_set = np.maximum(discov_x(beta if beta_obs is None else beta_obs, v_cutoff), min_x)
+    global_x, SS, tau = build_integration_grid_dir(sfs_pile, min_x, n_points)
+
+    def llfun(I1):
+        return total_ll_dir(global_x, tau.T, SS, Ne, beta, raf, v_cutoff, min_x, n_x,
+                            I1=I1, d_x_set=d_x_set)
+
+    if spline:
+        llfun_vec = np.vectorize(llfun, otypes=[float])
+        I1_set = np.linspace(I1_mle - 2*hh, I1_mle + 2*hh, 200)
+        ll_values = llfun_vec(I1_set)
+        finite_set = np.isfinite(ll_values)
+        I1_set = I1_set[finite_set]
+        ll_values = ll_values[finite_set]
+        smoothed_ll_values = whittaker(ll_values, lam=10)
+        spline_fit = interpolate.UnivariateSpline(I1_set, smoothed_ll_values, s=0, k=3)
+        fisher_info = -spline_fit.derivatives(I1_mle)[2]
+        # print(fisher_info)
+        if fisher_info <= 0:
+            raise ValueError("Fisher information is non-positive, cannot compute Wald CI.")
+        se = np.sqrt(1 / fisher_info)
+        z = stats.norm.ppf(1.0 - alpha / 2.0)
+        ci = (I1_mle - z*se, I1_mle, I1_mle + z*se)
+    else:
+        fisher_info = (llfun(I1_mle + 2*hh) - 16 * llfun(I1_mle + hh)
+                       + 30 * llfun(I1_mle) - 16 * llfun(I1_mle - hh)
+                       + llfun(I1_mle - 2*hh)) / (12 * hh**2)
+        # print(fisher_info)
+        if fisher_info <= 0:
+            raise ValueError("Fisher information is non-positive, cannot compute Wald CI.")
+        se = np.sqrt(1 / fisher_info)
+        z = stats.norm.ppf(1.0 - alpha / 2.0)
+        ci = (I1_mle - z*se, I1_mle, I1_mle + z*se)
+
+    return ci

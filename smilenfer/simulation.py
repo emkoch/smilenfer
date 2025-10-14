@@ -468,3 +468,43 @@ def ds_sfs_ud_params(xx, theta, ss, Ne):
     A3 = spy.erf(np.sqrt(2*Ne*ss)*(0.5-xx))/spy.erf(np.sqrt(Ne*ss/2))
     return mult_factor*(A1-A2)/(xx*(1-xx)) - mult_factor*Ne*(1 + A3)
     
+
+def truncate_pile(sfs_pile, factor=1e-8):
+    """
+    Truncate the selected sfs so that there is never 1/factor more selected sfs than neutral sfs
+    above the derived allele frequency where the ratio is first greater than that factor.
+    Purpose of this is to ignore regions where the sfs is flat some region in the selected sfs
+    but it is incredibly unlikely to actually see mutations in that frequency range.
+
+    Assuming ~15 million SNPs with frequency > 1% in humans, the factor of 1e-8 corresponds to
+    less than 1 selected SNP in the entire genome.
+
+    Parameters
+    ----------
+    sfs_pile : dict
+        The sfs pile dictionary
+    factor : float
+        The ratio of the selected sfs to the neutral sfs
+    """
+
+    # Get the neutral sfs
+    xx = sfs_pile["interp_x"]
+    s_zero = np.where(sfs_pile["s_set"]==0)[0][0]
+    s_ud_zer = np.where(sfs_pile["s_ud_set"]==0)[0][0]
+    sfs_neutral = sfs_pile["sfs_grid"][s_zero, s_ud_zer, :]
+    # make a copy of the entire pile dict
+    new_pile = copy.deepcopy(sfs_pile)
+
+    for ii, ss in enumerate(sfs_pile["s_set"]):
+        for jj, s_ud in enumerate(sfs_pile["s_ud_set"]):
+            sfs_sel = sfs_pile["sfs_grid"][ii, jj, :]
+            new_sfs = sfs_sel.copy()
+            kk = 0
+            while poly_ratio(sfs_neutral[kk:], sfs_sel[kk:], xx[kk:]) > factor:
+                kk += 1
+                if kk == len(xx)-1:
+                    break
+            if kk < len(xx)-1:
+                new_sfs[kk:] = 0
+            new_pile["sfs_grid"][ii, jj, :] = new_sfs
+    return new_pile

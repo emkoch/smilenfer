@@ -46,7 +46,7 @@ rule all:
         "opt_fits_original_traits_eur_raw_ci.csv",
         "opt_fits_original_traits_eur_post_ci.pkl",
         "opt_fits_original_traits_eur_post_ci.csv",
-        expand("{trait}_standard_fits_raw_bootstrap.pkl", trait=TRAITS)
+        expand("bootstrap/{trait}_standard_fits_raw_bootstrap.pkl", trait=TRAITS)
 
 rule fit_one_sample:
     input:
@@ -230,8 +230,8 @@ rule bootstrap_one_sample:
             ),
             sfs_pile=SFS_PILE
     output:
-        "{trait}_standard_fits_raw_bootstrap.pkl",
-        "{trait}_standard_fits_post_bootstrap.pkl"
+        "bootstrap/{trait}_standard_fits_raw_bootstrap.pkl",
+        "bootstrap/{trait}_standard_fits_post_bootstrap.pkl"
     params:
         n_bootstraps=1000,
         trait="{trait}"

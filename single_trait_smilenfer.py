@@ -19,12 +19,13 @@ Options:
     --input: Input data file (required)
     --output: Output file for results (default: output.csv)
     --pvalue_threshold: P-value threshold for significance (default: 5e-8)
+    --maf_threshold: Minor allele frequency threshold (default: 0.01)
     --true_rbeta_col: Column name for "true" beta values. These will be treated as true effect sizes while rbeta is used for ascertainment (optional)
     --sfs_pile: SFS pile option - 'eur' or 'jpt' (default: eur)
     --explicit_pvalue_filter: Apply explicit p-value filtering
 
 Example:
-    python single_trait_smilenfer.py --input results/data/final/original_traits/processed.asthma.snps_low_r2.tsv --output asthma_results.csv --pvalue_threshold 5e-8
+    python single_trait_smilenfer.py --input results/data/final/original_traits/processed.asthma.snps_low_r2.tsv --output asthma_results.csv --pvalue_threshold 5e-8 --maf_threshold 0.01
 """
 
 import argparse
@@ -55,6 +56,7 @@ def parse_arguments(argv=None):
     parser.add_argument("--input", type=str, required=True, help="Input data file")
     parser.add_argument("--output", type=str, default="output.csv", help="Output file for results")
     parser.add_argument("--pvalue_threshold", type=float, default=5e-8, help="P-value threshold for significance")
+    parser.add_argument("--maf_threshold", type=float, default=0.01, help="Minor allele frequency threshold")
     parser.add_argument("--true_rbeta_col", type=str, default=None, help="Column name for beta values")
     parser.add_argument("--sfs_pile", type=str, choices=['eur', 'jpt'], default='eur', help="SFS pile option: 'eur' or 'jpt' (default: eur)")
     parser.add_argument("--explicit_pvalue_filter", action="store_true", help="Whether to explicitly filter by p-value threshold")
@@ -131,7 +133,7 @@ def main(argv=None):
         raf_keep,
         rbeta_keep,
         v_cut,
-        min_x=0.01,
+        min_x=args.maf_threshold,
         n_points=1000,
         n_x=1000,
         beta_obs=rbeta_post_keep,

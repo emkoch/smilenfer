@@ -1,3 +1,5 @@
+import dadi
+import math
 import numpy as np
 import scipy.stats as stats
 import scipy.misc as misc
@@ -15,10 +17,21 @@ def erf(x):
     return 2*stats.norm.cdf(x*np.sqrt(2)) - 1
 
 def pi_dir_db(SS):
-    result_neg = (1-np.exp(2*SS))/(1-np.exp(4*SS))
-    result_pos = (np.exp(-2*SS)*(np.exp(-2*SS)-1))/(np.exp(-4*SS)-1)
-    return np.where(SS == 0, 0.5,
-                    np.where(SS < 0, result_neg, result_pos))
+    SS = np.asarray(SS, dtype=np.float64)
+    result = np.empty_like(SS, dtype=np.float64)
+
+    mask0 = (SS == 0)
+    result[mask0] = 0.5
+
+    mask_neg = (SS < 0)
+    if np.any(mask_neg):
+        result[mask_neg] = np.expm1(2 * SS[mask_neg]) / np.expm1(4 * SS[mask_neg])
+
+    mask_pos = (SS > 0)
+    if np.any(mask_pos):
+        result[mask_pos] = np.exp(-2 * SS[mask_pos]) * np.expm1(-2 * SS[mask_pos]) / np.expm1(-4 * SS[mask_pos])
+
+    return result
 
 def pi_full_db_hack(SS_dir, SS_stab):
     delta_SS = 2*SS_dir - SS_stab
@@ -126,33 +139,33 @@ def sfs_ud_params_log(xx, theta, S_ud):
     return np.where(xx < 0.5, non_erf_term + erf_term_low, non_erf_term + erf_term_high)
 
 ###
-def sfs_full_WF_grid(S_dir_set, S_ud_set, WF_pile, x_set=None):
-    s_dir_comp = S_dir_set/(2*WF_pile["tenn_N"][0])
-    s_dir_comp[s_dir_comp >= np.max(WF_pile["s_set"])] = np.max(WF_pile["s_set"]) - 1/(2*WF_pile["tenn_N"][0]*1000)
-    s_dir_comp[s_dir_comp <= np.min(WF_pile["s_set"])] = np.min(WF_pile["s_set"]) + 1/(2*WF_pile["tenn_N"][0]*1000)
+def sfs_full_WF_grid(S_dir_set, S_ud_set, sfs_pile, x_set=None):
+    s_dir_comp = S_dir_set/(2*sfs_pile["N_traj"][0])
+    s_dir_comp[s_dir_comp >= np.max(sfs_pile["s_set"])] = np.max(sfs_pile["s_set"]) - 1/(2*sfs_pile["N_traj"][0]*1000)
+    s_dir_comp[s_dir_comp <= np.min(sfs_pile["s_set"])] = np.min(sfs_pile["s_set"]) + 1/(2*sfs_pile["N_traj"][0]*1000)
 
-    s_ud_comp = np.abs(S_ud_set)/(2*WF_pile["tenn_N"][0])# if WF_pile is not None:
+    s_ud_comp = np.abs(S_ud_set)/(2*sfs_pile["N_traj"][0])# if sfs_pile is not None:
 
-    s_ud_wf = np.abs(WF_pile["s_ud_set"])
+    s_ud_wf = np.abs(sfs_pile["s_ud_set"])
     s_ud_wf_max = np.max(s_ud_wf)
-    s_ud_comp[s_ud_comp >= s_ud_wf_max] = s_ud_wf_max - 1/(2*WF_pile["tenn_N"][0]*1000)
+    s_ud_comp[s_ud_comp >= s_ud_wf_max] = s_ud_wf_max - 1/(2*sfs_pile["N_traj"][0]*1000)
 
-    s_ii_upper = np.argmax(WF_pile["s_set"][:,np.newaxis] > s_dir_comp, axis=0)
+    s_ii_upper = np.argmax(sfs_pile["s_set"][:,np.newaxis] > s_dir_comp, axis=0)
     s_ii_lower = s_ii_upper - 1
 
     s_ud_ii_upper = np.argmax(s_ud_wf[:,np.newaxis] > s_ud_comp, axis=0)
     s_ud_ii_lower = s_ud_ii_upper - 1
 
-    s_upper = WF_pile["s_set"][s_ii_upper]
-    s_lower = WF_pile["s_set"][s_ii_lower]
+    s_upper = sfs_pile["s_set"][s_ii_upper]
+    s_lower = sfs_pile["s_set"][s_ii_lower]
 
     s_ud_upper = s_ud_wf[s_ud_ii_upper]
     s_ud_lower = s_ud_wf[s_ud_ii_lower]
 
-    sfs_11 = WF_pile["sfs_grid"][s_ii_lower, s_ud_ii_lower]
-    sfs_21 = WF_pile["sfs_grid"][s_ii_upper, s_ud_ii_lower]
-    sfs_12 = WF_pile["sfs_grid"][s_ii_lower, s_ud_ii_upper]
-    sfs_22 = WF_pile["sfs_grid"][s_ii_upper, s_ud_ii_upper]
+    sfs_11 = sfs_pile["sfs_grid"][s_ii_lower, s_ud_ii_lower]
+    sfs_21 = sfs_pile["sfs_grid"][s_ii_upper, s_ud_ii_lower]
+    sfs_12 = sfs_pile["sfs_grid"][s_ii_lower, s_ud_ii_upper]
+    sfs_22 = sfs_pile["sfs_grid"][s_ii_upper, s_ud_ii_upper]
 
     _zero_nan(sfs_11)
     _zero_nan(sfs_21)
@@ -170,42 +183,42 @@ def sfs_full_WF_grid(S_dir_set, S_ud_set, WF_pile, x_set=None):
     if x_set is not None:
         result = np.zeros((len(s_ii_upper), len(x_set)))
         for ii in range(len(s_ii_upper)):
-            result[ii] = np.interp(x_set, WF_pile["interp_x"], sfs[:,ii])
+            result[ii] = np.interp(x_set, sfs_pile["interp_x"], sfs[:,ii])
         return result.T
     return sfs
 
-def sfs_dir_WF_single(S_dir, WF_pile, x_set=None):
-    S_ud_0_ii = np.where(WF_pile["s_ud_set"]==0)[0][0]
-    sfs_grid = WF_pile["sfs_grid"][:,S_ud_0_ii]
+def sfs_dir_WF_single(S_dir, sfs_pile, x_set=None):
+    S_ud_0_ii = np.where(sfs_pile["s_ud_set"]==0)[0][0]
+    sfs_grid = sfs_pile["sfs_grid"][:,S_ud_0_ii]
     _zero_nan(sfs_grid)
-    s_dir_comp = S_dir/(2*WF_pile["tenn_N"][0])
-    if s_dir_comp >= np.max(WF_pile["s_set"]):
-        s_dir_comp = np.max(WF_pile["s_set"]) - 1/(2*WF_pile["tenn_N"][0]*1000)
-    elif s_dir_comp <= np.min(WF_pile["s_set"]):
-        s_dir_comp = np.min(WF_pile["s_set"]) + 1/(2*WF_pile["tenn_N"][0]*1000)
-    s_ii_upper = np.argmax(WF_pile["s_set"] > s_dir_comp)
+    s_dir_comp = S_dir/(2*sfs_pile["N_traj"][0])
+    if s_dir_comp >= np.max(sfs_pile["s_set"]):
+        s_dir_comp = np.max(sfs_pile["s_set"]) - 1/(2*sfs_pile["N_traj"][0]*1000)
+    elif s_dir_comp <= np.min(sfs_pile["s_set"]):
+        s_dir_comp = np.min(sfs_pile["s_set"]) + 1/(2*sfs_pile["N_traj"][0]*1000)
+    s_ii_upper = np.argmax(sfs_pile["s_set"] > s_dir_comp)
     s_ii_lower = s_ii_upper - 1
-    w_lower = (WF_pile["s_set"][s_ii_upper] - s_dir_comp)/(WF_pile["s_set"][s_ii_upper] -
-                                                           WF_pile["s_set"][s_ii_lower])
+    w_lower = (sfs_pile["s_set"][s_ii_upper] - s_dir_comp)/(sfs_pile["s_set"][s_ii_upper] -
+                                                           sfs_pile["s_set"][s_ii_lower])
     w_upper = 1 - w_lower
 
     sfs = (w_upper*sfs_grid[s_ii_upper] +
            w_lower*sfs_grid[s_ii_lower])
     if x_set is not None:
-        return np.interp(x_set, WF_pile["interp_x"], sfs)
+        return np.interp(x_set, sfs_pile["interp_x"], sfs)
     return sfs
 
-def sfs_dir_WF_grid(S_dir_set, WF_pile, x_set=None):
-    S_ud_0_ii = np.where(WF_pile["s_ud_set"]==0)[0][0]
-    sfs_grid = WF_pile["sfs_grid"][:,S_ud_0_ii]
+def sfs_dir_WF_grid(S_dir_set, sfs_pile, x_set=None):
+    S_ud_0_ii = np.where(sfs_pile["s_ud_set"]==0)[0][0]
+    sfs_grid = sfs_pile["sfs_grid"][:,S_ud_0_ii]
     _zero_nan(sfs_grid)
-    s_dir_comp = S_dir_set/(2*WF_pile["tenn_N"][0])
-    s_dir_comp[s_dir_comp >= np.max(WF_pile["s_set"])] = np.max(WF_pile["s_set"]) - 1/(2*WF_pile["tenn_N"][0]*100)
-    s_dir_comp[s_dir_comp <= np.min(WF_pile["s_set"])] = np.min(WF_pile["s_set"]) + 1/(2*WF_pile["tenn_N"][0]*100)
-    s_ii_upper = np.argmax(WF_pile["s_set"][:,np.newaxis] > s_dir_comp, axis=0)
+    s_dir_comp = S_dir_set/(2*sfs_pile["N_traj"][0])
+    s_dir_comp[s_dir_comp >= np.max(sfs_pile["s_set"])] = np.max(sfs_pile["s_set"]) - 1/(2*sfs_pile["N_traj"][0]*100)
+    s_dir_comp[s_dir_comp <= np.min(sfs_pile["s_set"])] = np.min(sfs_pile["s_set"]) + 1/(2*sfs_pile["N_traj"][0]*100)
+    s_ii_upper = np.argmax(sfs_pile["s_set"][:,np.newaxis] > s_dir_comp, axis=0)
     s_ii_lower = s_ii_upper - 1
-    w_lower = (WF_pile["s_set"][s_ii_upper] - s_dir_comp)/(WF_pile["s_set"][s_ii_upper] -
-                                                           WF_pile["s_set"][s_ii_lower])
+    w_lower = (sfs_pile["s_set"][s_ii_upper] - s_dir_comp)/(sfs_pile["s_set"][s_ii_upper] -
+                                                           sfs_pile["s_set"][s_ii_lower])
     w_upper = 1 - w_lower
     sfs = (w_upper[:,np.newaxis]*sfs_grid[s_ii_upper] +
            w_lower[:,np.newaxis]*sfs_grid[s_ii_lower])
@@ -214,24 +227,19 @@ def sfs_dir_WF_grid(S_dir_set, WF_pile, x_set=None):
     if x_set is not None:
         result = np.zeros((len(s_ii_upper), len(x_set)))
         for ii in range(len(s_ii_upper)):
-            result[ii] = np.interp(x_set, WF_pile["interp_x"], sfs[ii])
+            result[ii] = np.interp(x_set, sfs_pile["interp_x"], sfs[ii])
         return np.transpose(result)
     return np.transpose(sfs)
 
-def sfs_ud_WF_single(S_ud, WF_pile, x_set=None):
+def sfs_ud_WF_single(S_ud, sfs_pile, x_set=None):
     S_ud = np.abs(S_ud)
     ## Get UD grid and selection values
-    sfs_grid = WF_pile["sfs_grid"][np.where(WF_pile["s_set"] == 0)[0][0]]
+    sfs_grid = sfs_pile["sfs_grid"][np.where(sfs_pile["s_set"] == 0)[0][0]]
     _zero_nan(sfs_grid)
-    s_ud_comp = S_ud/(2*WF_pile["tenn_N"][0])
-    s_ud_wf = np.abs(WF_pile["s_ud_set"])
-    # s_ud_wf_max = np.max(s_ud_wf)
-    # if s_ud_comp >= s_ud_wf_max:
-    #     s_ud_comp = s_ud_wf_max - 1/(2*WF_pile["tenn_N"][0]*1000)
-    # s_ud_ii_upper = np.argmax(s_ud_wf > s_ud_comp)
+    s_ud_comp = S_ud/(2*sfs_pile["N_traj"][0])
+    s_ud_wf = np.abs(sfs_pile["s_ud_set"])
     s_ud_ii_upper = np.searchsorted(s_ud_wf, s_ud_comp)
     s_ud_ii_upper = min(len(s_ud_wf) - 1, s_ud_ii_upper)
-    # s_ud_comp = min(s_ud_wf[s_ud_ii_upper] - 1/(2*WF_pile["tenn_N"][0]*1000), s_ud_comp)
     s_ud_ii_lower = s_ud_ii_upper - 1
     w_lower = (s_ud_wf[s_ud_ii_upper] - s_ud_comp) / (s_ud_wf[s_ud_ii_upper] - s_ud_wf[s_ud_ii_lower])
     w_upper = 1 - max(w_lower, 0)
@@ -239,19 +247,18 @@ def sfs_ud_WF_single(S_ud, WF_pile, x_set=None):
     sfs = (w_upper*sfs_grid[s_ud_ii_upper] +
            w_lower*sfs_grid[s_ud_ii_lower])
     if x_set is not None:
-        return np.interp(x_set, WF_pile["interp_x"], sfs)
+        return np.interp(x_set, sfs_pile["interp_x"], sfs)
     return sfs
     
-def sfs_ud_WF_grid(S_ud_set, WF_pile, x_set=None):
+def sfs_ud_WF_grid(S_ud_set, sfs_pile, x_set=None):
     S_ud_set = np.abs(S_ud_set)
-    ## Get UD grid and selection values
-    S_0_ii = np.where(WF_pile["s_set"] == 0)[0][0]
-    sfs_grid = WF_pile["sfs_grid"][S_0_ii]
+    S_0_ii = np.where(sfs_pile["s_set"] == 0)[0][0]
+    sfs_grid = sfs_pile["sfs_grid"][S_0_ii]
     _zero_nan(sfs_grid)
-    s_ud_comp = S_ud_set/(2*WF_pile["tenn_N"][0])
-    s_ud_wf = np.abs(WF_pile["s_ud_set"])
+    s_ud_comp = S_ud_set/(2*sfs_pile["N_traj"][0])
+    s_ud_wf = np.abs(sfs_pile["s_ud_set"])
     s_ud_wf_max = np.max(s_ud_wf)
-    s_ud_comp[s_ud_comp >= s_ud_wf_max] = s_ud_wf_max - 1/(2*WF_pile["tenn_N"][0]*1000)
+    s_ud_comp[s_ud_comp >= s_ud_wf_max] = s_ud_wf_max - 1/(2*sfs_pile["N_traj"][0]*1000)
     s_ud_ii_upper = np.argmax(s_ud_wf[:,np.newaxis] > s_ud_comp, axis=0)
     s_ud_ii_lower = s_ud_ii_upper - 1
 
@@ -265,7 +272,7 @@ def sfs_ud_WF_grid(S_ud_set, WF_pile, x_set=None):
     if x_set is not None:
         result = np.zeros((len(s_ud_ii_upper), len(x_set)))
         for ii in range(len(s_ud_ii_upper)):
-            result[ii] = np.interp(x_set, WF_pile["interp_x"], sfs[ii])
+            result[ii] = np.interp(x_set, sfs_pile["interp_x"], sfs[ii])
         return np.transpose(result)
     return np.transpose(sfs)
 
@@ -467,7 +474,154 @@ def ds_sfs_ud_params(xx, theta, ss, Ne):
           (np.sqrt(2*np.pi*ss)*spy.erf(np.sqrt(Ne*ss/2))**2))
     A3 = spy.erf(np.sqrt(2*Ne*ss)*(0.5-xx))/spy.erf(np.sqrt(Ne*ss/2))
     return mult_factor*(A1-A2)/(xx*(1-xx)) - mult_factor*Ne*(1 + A3)
+
+def tennessen_model(kk=1):
+    N0 = math.ceil(7310*kk)
+    N_old_growth = math.ceil(14474*kk)
+    N_ooa_bn = math.ceil(1861*kk)
+    N_ooa_bn_2 = math.ceil(1032*kk)
+    N_growth_1 = math.ceil(9300*kk)
+    N_growth_2 = math.ceil(512000*kk)
+
+    t_old_growth = math.ceil(3880*kk)
+    t_ooa_bn = math.ceil(1120*kk)
+    t_growth_1 = math.ceil(715*kk)
+    t_growth_2 = math.ceil(205*kk)
+
+    r_growth_1 = (N_growth_1/N_ooa_bn_2)**(1/(t_growth_1-1))
+    r_growth_2 = (N_growth_2/N_growth_1)**(1/(t_growth_2))
+
+    N_set = np.array([N0] + [N_old_growth]*t_old_growth)
+    N_set = np.append(N_set, [N_ooa_bn]*t_ooa_bn)
+    N_set = np.append(N_set, N_ooa_bn_2*r_growth_1**np.arange(t_growth_1))
+    N_set = np.append(N_set, N_growth_1*r_growth_2**np.arange(1, t_growth_2+1))
+    return N_set.astype(np.int)
+
+def gutenkunst_model_chb(kk=1):
+    N0 = math.ceil(7300*kk)
+    N_old_growth = math.ceil(12300*kk)
+    N_ooa_bn = math.ceil(2100*kk)
+    N_ooa_split = math.ceil(510)
+
+    t_old_growth = math.ceil(3200*kk)
+    t_ooa_bn = math.ceil(4752*kk)
+    t_growth = math.ceil(848*kk)
+
+    growth_rate_per_gen = 0.0055
+
+    N_set = np.array([N0] + [N_old_growth]*t_old_growth)
+    N_set = np.append(N_set, [N_ooa_bn]*t_ooa_bn)
+    N_set = np.append(N_set, N_ooa_split*np.array([np.exp(growth_rate_per_gen * tt) 
+                                                   for tt in range(t_growth)]))
+    return N_set.astype(np.int)
+
+def jouganous_model_jpt():
+    N0 = 11293
+    N_old_growth = 23721
+    N_ooa_bn = 2831
+    N_chb_bn = 1019
+    N_jpt_bn = 4384
+
+    t_old_growth = math.ceil((357000 - 119000) / 29)
+    t_ooa_bn = math.ceil((119000 - 46000) / 29)
+    t_chb_bn = math.ceil((46000 - 9000) / 29)
+    t_jpt_bn = math.ceil(9000 / 29)
+
+    r_chb_bn = 1.0026
+    r_jpt_bn = 1.0129
+
+    N_set = np.array([N0] + [N_old_growth]*t_old_growth)                 # Old growth period
+    N_set = np.append(N_set, [N_ooa_bn]*t_ooa_bn)                        # OOA bottleneck period
+    N_set = np.append(N_set, N_chb_bn * r_chb_bn ** np.arange(t_chb_bn)) # CHB bottleneck period
+    N_set = np.append(N_set, N_jpt_bn * r_jpt_bn ** np.arange(t_jpt_bn)) # JPT bottleneck period
     
+    return N_set.astype(int)
+
+def generate_tennessen_dadi_func():
+    """
+    Generate a function that interpolates the Tennessen et al. (2012) model
+    of human population growth in units of 2N0 generations where N0 is the
+    initial effective population size (7310).
+    """
+    tenn_N = tennessen_model()
+    tenn_nu = tenn_N / tenn_N[0]
+    tenn_T = np.arange(len(tenn_N)) / (2 * tenn_N[0])
+    tenn_nu_func = lambda t: np.interp(t, tenn_T, tenn_nu)
+    return tenn_nu_func, tenn_T[-1]
+
+def generate_gutenkunst_dadi_func():
+    """
+    Generate a function that interpolates the Gutenkunst et al. (2009) model
+    of human population growth in units of 2N0 generations where N0 is the
+    initial effective population size (7310).
+    """
+    gutenkunst_N = gutenkunst_model_chb()
+    gutenkunst_nu = gutenkunst_N / gutenkunst_N[0]
+    gutenkunst_T = np.arange(len(gutenkunst_N)) / (2 * gutenkunst_N[0])
+    gutenkunst_nu_func = lambda t: np.interp(t, gutenkunst_T, gutenkunst_nu)
+    return gutenkunst_nu_func, gutenkunst_T[-1]
+
+def generate_jouganous_dadi_func():
+    """
+    Generate a function that interpolates the Jouganous et al. (2017) model
+    of human population growth in units of 2N0 generations where N0 is the
+    initial effective population size (7310).
+    """
+    jouganous_N = jouganous_model_jpt()
+    jouganous_nu = jouganous_N / jouganous_N[0]
+    jouganous_T = np.arange(len(jouganous_N)) / (2 * jouganous_N[0])
+    jouganous_nu_func = lambda t: np.interp(t, jouganous_T, jouganous_nu)
+    return jouganous_nu_func, jouganous_T[-1]
+
+def sm_to_dadi_params(S_ud, S_dir, gamma_fudge=-0.0001):
+    gamma_ud = -np.abs(S_ud) / 2
+    gamma_dir = S_dir + gamma_fudge
+    hh = (gamma_dir + gamma_ud) / (2 * gamma_dir)
+    return gamma_dir, hh
+
+def run_tennessen_dadi(S_dir, S_ud, pts=10000, xx=None):
+    if xx is None:
+        xx = dadi.Numerics.default_grid(pts)
+    gamma, hh = sm_to_dadi_params(S_ud, S_dir)
+    tenn_nu_func, tenn_T_end = generate_tennessen_dadi_func()
+    phi = dadi.PhiManip.phi_1D(xx, gamma=gamma, h=hh)
+    phi = dadi.Integration.one_pop(phi, xx, T=tenn_T_end, nu=tenn_nu_func, gamma=gamma, h=hh)
+    return xx, phi
+
+def run_gutenkunst_dadi(S_dir, S_ud, pts=10000, xx=None):
+    if xx is None:
+        xx = dadi.Numerics.default_grid(pts)
+    gamma, hh = sm_to_dadi_params(S_ud, S_dir)
+    gutenkunst_nu_func, gutenkunst_T_end = generate_gutenkunst_dadi_func()
+    phi = dadi.PhiManip.phi_1D(xx, gamma=gamma, h=hh)
+    phi = dadi.Integration.one_pop(phi, xx, T=gutenkunst_T_end, nu=gutenkunst_nu_func, gamma=gamma, h=hh)
+    return xx, phi
+
+def run_jouganous_dadi(S_dir, S_ud, pts=10000, xx=None):
+    if xx is None:
+        xx = dadi.Numerics.default_grid(pts)
+    gamma, hh = sm_to_dadi_params(S_ud, S_dir)
+    jouganous_nu_func, jouganous_T_end = generate_jouganous_dadi_func()
+    phi = dadi.PhiManip.phi_1D(xx, gamma=gamma, h=hh)
+    phi = dadi.Integration.one_pop(phi, xx, T=jouganous_T_end, nu=jouganous_nu_func, gamma=gamma, h=hh)
+    return xx, phi
+
+def poly_ratio(neut_sfs, sel_sfs, xx):
+    """
+    Calculate the ratio of the area under the selected sfs to the area under the neutral sfs
+
+    Parameters
+    ----------
+    neut_sfs : array
+        The neutral sfs
+    sel_sfs : array
+        The selected sfs
+    xx : array
+        The set of derived allele frequencies for sfs grids
+    """
+    neut_area = np.trapz(neut_sfs, xx)
+    sel_area = np.trapz(sel_sfs, xx)
+    return sel_area / neut_area
 
 def truncate_pile(sfs_pile, factor=1e-8):
     """
@@ -493,7 +647,7 @@ def truncate_pile(sfs_pile, factor=1e-8):
     s_ud_zer = np.where(sfs_pile["s_ud_set"]==0)[0][0]
     sfs_neutral = sfs_pile["sfs_grid"][s_zero, s_ud_zer, :]
     # make a copy of the entire pile dict
-    new_pile = copy.deepcopy(sfs_pile)
+    new_pile = deepcopy(sfs_pile)
 
     for ii, ss in enumerate(sfs_pile["s_set"]):
         for jj, s_ud in enumerate(sfs_pile["s_ud_set"]):

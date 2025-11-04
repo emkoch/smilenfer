@@ -1,4 +1,4 @@
-## Code for Figure 1
+## Old code for Figure 1 and supplemental smiles figures
 ## Also added code for plotting all smiles for all traits
 ## Also added code for plotting the smile fits traits
 import os
@@ -15,12 +15,11 @@ import seaborn as sns
 from scipy import stats
 import scipy.stats as stats
 
-import smilenfer.posterior as post
 import smilenfer.plotting as splot
 splot._plot_params()
 matplotlib.rcParams.update({'font.size': 18})
 
-data_dir = "../data"
+data_dir = "../../data"
 min_x = 0.01
 p_thresh = 5e-08
 p_cutoff = 5e-08

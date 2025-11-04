@@ -12,6 +12,13 @@ from . import statistics as smile_stats
 import scipy.stats as stats
 import scipy.optimize as opt
 
+import warnings
+import os
+
+_MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
+_DATA_DIR = os.path.abspath(os.path.join(_MODULE_DIR, "data"))
+
+
 def inv_logsf_chi2(neg_log10_p, df=1):
     ## Solve for the chi2 value that corresponds to a given p-value
     ## using the inverse survival function of the chi2 distribution
@@ -425,3 +432,139 @@ def prepare_data_from_ci_results(ci_results):
     df = pd.DataFrame(rows)
     df = df.sort_values(by=["trait"]).reset_index(drop=True)
     return df
+
+original_traits = [
+    "arthrosis",
+    "asthma",
+    "bc",
+    "bmi",
+    "cad",
+    "dbp",
+    "diverticulitis",
+    "fvc",
+    "gallstones",
+    "glaucoma",
+    "grip_strength",
+    "hdl",
+    "height",
+    "hypothyroidism",
+    "ibd",
+    "ldl",
+    "malignant_neoplasms",
+    "pulse_rate",
+    "rbc",
+    "sbp",
+    "scz",
+    "t2d",
+    "triglycerides",
+    "urate",
+    "uterine_fibroids",
+    "varicose_veins",
+    "wbc",
+]
+
+original_trait_groups = {"Quantitative":["height", "bmi", "ldl", "hdl", "dbp", "sbp", "triglycerides", 
+                                "urate", "rbc", "wbc", "grip_strength", "fvc", "pulse_rate"],
+                 "Disease": ["bc", "cad", "ibd", "scz", "t2d", "arthrosis", "asthma", 
+                             "diverticulitis", "gallstones", "glaucoma", "hypothyroidism",
+                             "malignant_neoplasms", "uterine_fibroids", "varicose_veins"]}
+
+original_trait_group_labels = ["Quantitative", "Disease"]
+
+original_trait_names = {
+    # Quantitative traits
+    "height": "Standing height",
+    "bmi": "BMI",
+    "ldl": "LDL levels",
+    "hdl": "HDL levels",
+    "dbp": "Diastolic BP",
+    "sbp": "Systolic BP",
+    "triglycerides": "Triglycerides",
+    "urate": "Urate",
+    "rbc": "RBC",
+    "wbc": "WBC",
+    "grip_strength": "Grip strength",
+    "fvc": "FVC",
+    "pulse_rate": "Pulse rate",
+
+    # Disease traits
+    "bc": "Breast cancer",
+    "cad": "CAD",
+    "ibd": "IBD",
+    "scz": "SCZ",
+    "t2d": "T2D",
+    "arthrosis": "Arthrosis",
+    "asthma": "Asthma",
+    "diverticulitis": "Diverticulitis",
+    "gallstones": "Gallstones",
+    "glaucoma": "Glaucoma",
+    "hypothyroidism": "Hypothyroidism",
+    "malignant_neoplasms": "Malignant neoplasms",
+    "uterine_fibroids": "Uterine fibroids",
+    "varicose_veins": "Varicose veins"
+}
+
+def original_trait_files():
+    ORIGINAL_DATA_DIR = os.path.abspath(os.path.join(_DATA_DIR, "final", "original_traits"))
+    data_traits = {}
+    for trait in original_traits:
+        data_traits[trait] = pd.read_csv(os.path.join(ORIGINAL_DATA_DIR, 
+                                                      f"processed.{trait}.snps_low_r2.tsv"), sep="\t")
+        data_traits[trait]["median_n_eff"] = np.nanmedian(data_traits[trait]["n_eff"])
+        data_traits[trait]["pval"] = 10**-data_traits[trait]["neglog10p"]
+    original_trait_labels = [original_trait_names[trait] for trait in original_traits]
+    return original_traits, original_trait_labels, data_traits
+
+
+
+bbj_traits = [
+    "asthma",
+    "bc",
+    "bmi",
+    "cad",
+    "dbp",
+    "gallstones",
+    "hdl",
+    "height",
+    "ldl",
+    "rbc",
+    "sbp",
+    "t2d",
+    "triglycerides",
+    "uterine_fibroids",
+]
+
+bbj_trait_groups = {
+    "Quantitative": ["height", "bmi", "ldl", "hdl", "dbp", "sbp", "triglycerides", "rbc"],
+    "Disease": ["bc", "cad", "t2d", "asthma", "gallstones", "uterine_fibroids"]
+}
+
+bbj_trait_group_labels = ["Quantitative", "Disease"]
+
+bbj_trait_names = {
+    "height": "Standing height",
+    "bmi": "BMI",
+    "ldl": "LDL levels",
+    "hdl": "HDL levels",
+    "dbp": "Diastolic BP",
+    "sbp": "Systolic BP",
+    "triglycerides": "Triglycerides",
+    "rbc": "RBC",
+    "bc": "Breast cancer",
+    "cad": "CAD",
+    "t2d": "T2D",
+    "asthma": "Asthma",
+    "gallstones": "Gallstones",
+    "uterine_fibroids": "Uterine fibroids"
+}
+
+def bbj_trait_files():
+    BBJ_DATA_DIR = os.path.abspath(os.path.join(_DATA_DIR, "final", "bbj_traits"))
+    data_traits = {}
+    for trait in bbj_traits:
+        data_traits[trait] = pd.read_csv(os.path.join(BBJ_DATA_DIR,
+                                                      f"processed.{trait}.max_r2.bbj.tsv"), sep="\t")
+        data_traits[trait]["median_n_eff"] = np.nanmedian(data_traits[trait]["n_eff"])
+        data_traits[trait]["pval"] = 10**-data_traits[trait]["neglog10p"]
+    bbj_trait_labels = [bbj_trait_names[trait] for trait in bbj_traits]
+    return bbj_traits, bbj_trait_labels, data_traits

@@ -2706,3 +2706,62 @@ def wald_ci_I1(sfs_pile, Ne, raf, beta, v_cutoff, I1_mle, min_x=0.01, n_points=1
         ci = (I1_mle - z*se, I1_mle, I1_mle + z*se)
 
     return ci
+
+### Additional clumping functions
+def random_clump_trait_data(dd, dist=500000):
+    # create a copy of the dataframe
+    data = dd.copy()
+    # make a column to mark which rows have been "seen"
+    data["seen"] = False
+    # while not all rows have been seen
+    while not data["seen"].all():
+        # choose a random row that has not been seen
+        idx = np.random.choice(data[~data["seen"]].index)
+        # mark it as seen
+        data.at[idx, "seen"] = True
+        # delete all rows on the same chromosome that are within dist bp of the chosen row, except the chosen row
+        data = data[~((data.chr == data.loc[idx, 'chr']) & (np.abs(data.pos - data.loc[idx, 'pos']) < dist)) | (data.index == idx)]
+        # reset the index
+        data = data.reset_index(drop=True)
+    # drop the seen column
+    data = data.drop(columns=["seen"])
+    return data
+
+# same as above but choose the row with the smallest pval rather than at random
+def pval_clump_trait_data(dd, dist=500000):
+    # create a copy of the dataframe
+    data = dd.copy()
+    # make a column to mark which rows have been "seen"
+    data["seen"] = False
+    # while not all rows have been seen
+    while not data["seen"].all():
+        # choose a random row that has not been seen
+        idx = data[~data["seen"]].pval.idxmin() if "pval" in data.columns else data[~data["seen"]].neglog10p.idxmax()
+        # mark it as seen
+        data.at[idx, "seen"] = True
+        # delete all rows on the same chromosome that are within dist bp of the chosen row, except the chosen row
+        data = data[~((data.chr == data.loc[idx, 'chr']) & (np.abs(data.pos - data.loc[idx, 'pos']) < dist)) | (data.index == idx)]
+        # reset the index
+        data = data.reset_index(drop=True)
+    # drop the seen column
+    data = data.drop(columns=["seen"])
+    return data
+
+def high_clump_trait_data(dd, dist=500000):
+    # create a copy of the dataframe
+    data = dd.copy()
+    # make a column to mark which rows have been "seen"
+    data["seen"] = False
+    # while not all rows have been seen
+    while not data["seen"].all():
+        # choose a random row that has not been seen
+        idx = data[~data["seen"]].rbeta.idxmax()
+        # mark it as seen
+        data.at[idx, "seen"] = True
+        # delete all rows on the same chromosome that are within dist bp of the chosen row, except the chosen row
+        data = data[~((data.chr == data.loc[idx, 'chr']) & (np.abs(data.pos - data.loc[idx, 'pos']) < dist)) | (data.index == idx)]
+        # reset the index
+        data = data.reset_index(drop=True)
+    # drop the seen column
+    data = data.drop(columns=["seen"])
+    return data

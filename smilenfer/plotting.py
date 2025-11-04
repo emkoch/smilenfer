@@ -1,4 +1,5 @@
 import os
+import math
 import numpy as np
 import pandas as pd
 import seaborn as sns
@@ -1324,3 +1325,163 @@ def read_trait_files(data_dir, ash_type="genome_wide_ash", fname="clumped.{ash_t
     return (main_traits, main_traits_labels, data_main_traits,
             update_traits, update_traits_labels, data_update_traits, 
             all_traits, all_labels, data_all_traits)
+
+def plot_basic_smiles(all_traits, all_labels, data_traits_update, min_x, p_thresh, p_cutoff, 
+                      plot_name="basic_smiles_all_update.pdf", n_cols=4, offset = -0.01, col_size=10, row_size=6, labelsize=16,
+                      loci_count=False):
+    """
+    Plot scatterplots of per-locus effect sizes versus trait-increasing allele frequency
+    for multiple traits, overlaid with a discovery (power) boundary, and save the
+    composite panel figure as both PDF and PNG.
+    For each trait, loci are filtered prior to plotting by:
+    1. Minor allele frequency (MAF) >= min_x
+    2. A variance explained threshold derived from a chi-square cutoff:
+        v_cut = chi2.ppf(1 - p_thresh, df=1) / median_n_eff
+    3. P-value <= p_cutoff
+    Only variants passing all filters are retained. A dashed "discovery boundary"
+    curve is drawn to represent the minimum detectable effect size across a grid
+    of allele frequencies given v_cut: beta_detectable = sqrt(v_cut / (2 * p * (1 - p))).
+    Parameters
+    ----------
+    all_traits : Sequence[str]
+        Iterable of trait identifiers (keys into data_traits_update).
+    all_labels : Sequence[str]
+        Human-readable labels corresponding one-to-one with all_traits. Underscores
+        are replaced with spaces in plot annotations.
+    data_traits_update : Mapping[str, pandas.DataFrame]
+        Dictionary mapping each trait name to a DataFrame containing at least the
+        following columns:
+          - median_n_eff : Effective sample size (can be scalar-repeated; first
+            element is used).
+          - var_exp      : Variance explained per locus.
+          - maf          : Minor allele frequency (used for filtering).
+          - pval         : Association p-value.
+          - rbeta        : Effect size estimate aligned to the trait-increasing allele.
+          - raf          : Frequency of the trait-increasing (reference) allele
+            used on the x-axis.
+    min_x : float
+        Minimum allele frequency considered both for filtering (maf >= min_x) and
+        as the grid step size for constructing the discovery boundary (np.arange(min_x, 1, min_x)).
+    p_thresh : float
+        Tail probability (alpha) used to derive the chi-square critical value
+        (1 - p_thresh quantile) for the variance explained cutoff.
+    p_cutoff : float
+        Maximum allowed p-value for a locus to be included (pval <= p_cutoff).
+    plot_name : str, default="basic_smiles_all.pdf"
+        Output filename (PDF). A PNG of the same base name is also written.
+    n_cols : int, default=4
+        Number of columns in the facet grid. Rows are computed to fit all traits.
+    offset : float, default=-0.01
+        Positional offset used when placing the global x and y axis labels in figure
+        coordinates (left/bottom margins).
+    col_size : float, default=10
+        Width (in inches) allocated per column (multiplied by n_cols for total width).
+    row_size : float, default=6
+        Height (in inches) allocated per row (multiplied by number of rows).
+    labelsize : int, default=16
+        Font size for tick labels on individual subplots.
+    loci_count : bool, default=False
+        If True, append the number of plotted loci for each trait inside its panel label.
+    Behavior
+    --------
+    - Produces a multi-panel matplotlib figure (one panel per trait).
+    - Each panel:
+        * Sets x-limits to [-0.02, 1.02].
+        * Uses log scaling on the y-axis (effect sizes).
+        * Overlays a dashed discovery boundary curve.
+        * Plots individual loci as semi-transparent points with black edges.
+        * Annotates with the trait label (and locus count if loci_count=True).
+    - Unused subplot axes (if trait count not filling the grid) are hidden.
+    - Saves the figure twice:
+        * PDF: plot_name
+        * PNG: plot_name with .pdf replaced by .png (dpi=300)
+    Returns
+    -------
+    None
+        The function has the side effect of writing figure files to disk.
+    Notes
+    -----
+    - The discovery boundary uses the maximum observed effect size (scaled by 1.25)
+      at the edges (min_x and 1 - min_x) to "cap" the dashed line visually.
+    - Ensure that median_n_eff is present and consistent across loci; only the
+      first value is used. If per-locus effective sample size varies, this method
+      may misrepresent the true detection boundary.
+    - Setting an excessively small min_x may densify the boundary grid and slow
+      rendering.
+    Raises
+    ------
+    KeyError
+        If a trait in all_traits is missing from data_traits_update.
+    AttributeError
+        If required DataFrame columns are absent.
+    Example
+    -------
+    plot_basic_smiles(
+        all_traits=["height", "bmi", "whr"],
+        all_labels=["Height", "BMI", "WHR"],
+        data_traits_update=trait_df_dict,
+        min_x=0.01,
+        p_thresh=5e-8,
+        p_cutoff=5e-8,
+        plot_name="polygenic_effects.pdf",
+        n_cols=3,
+        loci_count=True
+    )
+    """
+    num_traits = len(all_traits)
+    num_rows = math.ceil(num_traits / n_cols)
+
+    fig, axes = plt.subplots(num_rows, n_cols, figsize=(col_size * n_cols, row_size * num_rows))
+    for i, trait in enumerate(all_traits):
+        trait_df = data_traits_update[trait].copy()
+        ax = axes.flatten()[i]
+        ax.set_xlim(-0.02, 1.02)
+        x_set = np.arange(min_x, 1, min_x)
+        v_cut = scipy.stats.chi2.ppf(q=1-p_thresh, df=1)/trait_df.median_n_eff[0]
+
+        cut_rows = np.array(trait_df.var_exp > v_cut) & np.array(trait_df.maf >= min_x)
+        cut_rows = cut_rows & np.array(trait_df.pval <= p_cutoff)
+
+        # filter out the rows that don't meet the cutoff
+        trait_df = trait_df[cut_rows]
+
+        discov_betas = np.sqrt(v_cut/(2*x_set*(1-x_set)))
+        beta_hat = trait_df.rbeta.to_numpy()
+        if np.max(beta_hat)*1.25 > np.max(discov_betas):
+            ax.plot(np.concatenate(([min_x], x_set, [1-min_x])),
+                      np.concatenate(([np.max(beta_hat)*1.25], discov_betas, [np.max(beta_hat)*1.25])),
+                      color="darkslategrey", linestyle="dashed", linewidth=4)
+        else:
+            ax.plot(x_set, discov_betas,
+                    color="darkslategrey", linestyle="dashed", linewidth=4)
+
+        sns.scatterplot(x=trait_df.raf.to_numpy(), y=trait_df.rbeta.to_numpy(), data=trait_df, ax=ax, 
+                        edgecolor="black", s=120, alpha=0.7)
+        
+        # make tick labels larger
+        ax.tick_params(axis='both', which='major', labelsize=labelsize)
+        ax.tick_params(axis='both', which='minor', labelsize=labelsize)
+        
+        ax.set_yscale("log")
+        ax.set_xlabel("")
+        ax.set_ylabel("")
+        if loci_count:
+            ax.text(0.2, 0.95, all_labels[i].replace("_", " ") + ", {} loci".format(len(trait_df.raf.to_numpy())), 
+                    transform=ax.transAxes, fontsize=30,
+                verticalalignment='top', bbox=dict(boxstyle='round', facecolor='white', alpha=0.5))
+        else:
+            ax.text(0.2, 0.95, all_labels[i].replace("_", " "), transform=ax.transAxes, fontsize=30,
+                verticalalignment='top', bbox=dict(boxstyle='round', facecolor='white', alpha=0.5))
+
+    # make any unused axes invisible
+    for i in range(num_traits, num_rows * n_cols):
+        axes.flatten()[i].axis("off")
+
+    # grand x axis label
+    fig.text(0.55, offset * 2, "Trait-increasing allele frequency", ha='center', va='center', fontsize=35)
+    # grand y axis label
+    fig.text(offset, 0.5, "Effect size", ha='center', va='center', rotation='vertical', fontsize=35)
+
+    fig.tight_layout()
+    fig.savefig(plot_name, bbox_inches="tight")
+    fig.savefig(plot_name.replace(".pdf", ".png"), bbox_inches="tight", dpi=300)

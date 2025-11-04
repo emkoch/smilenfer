@@ -2707,7 +2707,6 @@ def wald_ci_I1(sfs_pile, Ne, raf, beta, v_cutoff, I1_mle, min_x=0.01, n_points=1
 
     return ci
 
-### Additional clumping functions
 def random_clump_trait_data(dd, dist=500000):
     # create a copy of the dataframe
     data = dd.copy()

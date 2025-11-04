@@ -2441,6 +2441,65 @@ def case_deletion_deviation(sfs_pile, Ne, raf, beta, v_cutoff, model="I2", min_x
             raise ValueError("Invalid model fit encountered.")
     return deviance
 
+def llhood_neut(sfs_pile, beta_obs, raf, v_cutoff, min_x, n_x=1000, n_points=1000):
+    return llhood_s(sfs_pile, 1000, raf, beta_obs, v_cutoff, 1e-9, 
+                    min_x=min_x, n_points=n_points, n_x=n_x, beta_obs=None)
+
+def llhood_s(sfs_pile, Ne, raf, beta, v_cutoff, ss, min_x=0.01, n_points=1000, n_x=1000, beta_obs=None):
+    ss = np.abs(ss)
+    # check for NaN in raf, beta and raise ValueError
+    if np.any(np.isnan(raf)) or np.any(np.isnan(beta)):
+        raise ValueError("raf and beta must not contain NaN values (initial)")
+    raf, beta, beta_obs = filter_vars_vcutoff(raf, beta, v_cutoff, beta_obs)
+    d_x_set = np.maximum(discov_x(beta if beta_obs is None else beta_obs, v_cutoff), min_x)
+    # DIAGNOSE any nan values in d_x_set
+    if np.any(np.isnan(d_x_set)):
+        # show the offending points
+        print("d_x_set contains NaN values (induced by filter_vars_vcutoff)")
+        print(f"raf: {raf[np.isnan(d_x_set)]}")
+        print(f"beta: {beta[np.isnan(d_x_set)]}")
+        print(f"v_cutoff: {v_cutoff}")
+        print(f"beta_obs: {beta_obs[np.isnan(d_x_set)] if beta_obs is not None else None}")
+        raise ValueError("d_x_set contains NaN values (induced by filter_vars_vcutoff)")
+    
+    # check for NaN in raf or beta and raise ValueError
+    if np.any(np.isnan(raf)) or np.any(np.isnan(beta)):
+        raise ValueError("raf and beta must not contain NaN values (induced by filter_vars_vcutoff)")
+
+    global_x, SS, tau = build_integration_grid_s(sfs_pile, min_x, n_points)
+    return total_ll(global_x, tau.T, SS, Ne, beta, raf, v_cutoff, min_x, n_x, ss=ss, d_x_set=d_x_set)
+
+## Log-likelihood functions here are inefficient because they build grids from scratch each time.
+## Best for quick checks.
+def llhood_Ip(sfs_pile, Ne, raf, beta, v_cutoff, Ip, min_x=0.01, n_points=1000, n_x=1000, beta_obs=None):
+    raf, beta, beta_obs = filter_vars_vcutoff(raf, beta, v_cutoff, beta_obs)
+    d_x_set = np.maximum(discov_x(beta if beta_obs is None else beta_obs, v_cutoff), min_x)
+    global_x, _, _, S_p, int_grid = build_integration_grid(sfs_pile, min_x, n_points)
+    return total_ll(global_x, int_grid, S_p, Ne, beta, raf, v_cutoff, min_x, n_x, II=np.abs(Ip), d_x_set=d_x_set)
+
+def llhood_I2(sfs_pile, Ne, raf, beta, v_cutoff, I2, min_x=0.01, n_points=1000, n_x=1000, beta_obs=None):
+    raf, beta, beta_obs = filter_vars_vcutoff(raf, beta, v_cutoff, beta_obs)
+    d_x_set = np.maximum(discov_x(beta if beta_obs is None else beta_obs, v_cutoff), min_x)
+    global_x, S_ud, tau = build_simple_grid(sfs_pile, min_x, n_points)
+    return total_ll(global_x, tau.T, S_ud, Ne, beta, raf, v_cutoff, min_x, n_x, II=np.abs(I2), d_x_set=d_x_set)
+
+def llhood_Ir(sfs_pile, Ne, raf, beta, v_cutoff, Ir, rr, min_x=0.01, n_points=1000, n_x=1000, beta_obs=None):
+    raf, beta, beta_obs = filter_vars_vcutoff(raf, beta, v_cutoff, beta_obs)
+    d_x_set = np.maximum(discov_x(beta if beta_obs is None else beta_obs, v_cutoff), min_x)
+    global_x, S_ud, tau = build_simple_grid(sfs_pile, min_x, n_points)
+    return total_ll(global_x, tau.T, S_ud, Ne, beta, raf, v_cutoff, min_x, n_x, II=np.abs(Ir), rr=rr, d_x_set=d_x_set)
+
+def llhood_I1(sfs_pile, Ne, raf, beta, v_cutoff, I1, min_x=0.01, n_points=1000, n_x=1000, beta_obs=None):
+    raf, beta, beta_obs = filter_vars_vcutoff(raf, beta, v_cutoff, beta_obs)
+    d_x_set = np.maximum(discov_x(beta if beta_obs is None else beta_obs, v_cutoff), min_x)
+    global_x, SS, tau = build_integration_grid_dir(sfs_pile, min_x, n_points)
+    return total_ll_dir(global_x, tau.T, SS, Ne, beta, raf, v_cutoff, min_x, n_x, I1=I1, d_x_set=d_x_set)
+
+def llhood_full(sfs_pile, Ne, raf, beta, v_cutoff, I1, I2, min_x=0.01, n_x=1000, beta_obs=None):
+    raf, beta, beta_obs = filter_vars_vcutoff(raf, beta, v_cutoff, beta_obs)
+    d_x_set = np.maximum(discov_x(beta if beta_obs is None else beta_obs, v_cutoff), min_x)
+    return total_ll_full(sfs_pile, Ne, beta, raf, v_cutoff, min_x, n_x, I1=I1, I2=I2, d_x_set=d_x_set)
+
 def bootstrap_I2(sfs_pile, Ne, raf, beta, v_cutoff, 
                  min_x=0.01, n_points=1000, n_x=1000, beta_obs=None, 
                  n_boot=1000, ud=True, seed=None):

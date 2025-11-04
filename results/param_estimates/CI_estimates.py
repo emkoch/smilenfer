@@ -3,6 +3,8 @@ import pickle
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import smilenfer.plotting as splot
+splot._plot_params()
 
 fit_dir = "../all_opt_fits/original_traits/"
 fits_hat   = pd.read_csv(os.path.join(fit_dir, "opt_results_original_traits_eur_raw.csv"))

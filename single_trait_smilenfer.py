@@ -23,9 +23,10 @@ Options:
     --true_rbeta_col: Column name for "true" beta values. These will be treated as true effect sizes while rbeta is used for ascertainment (optional)
     --sfs_pile: SFS pile option - 'eur' or 'jpt' (default: eur)
     --explicit_pvalue_filter: Apply explicit p-value filtering
+    --infer_s: Fit the single s model in addition to the others
 
 Example:
-    python single_trait_smilenfer.py --input results/data/final/original_traits/processed.asthma.snps_low_r2.tsv --output asthma_results.csv --pvalue_threshold 5e-8 --maf_threshold 0.01
+    python single_trait_smilenfer.py --input results/data/final/original_traits/processed.asthma.snps_low_r2.tsv --output asthma_results.csv --pvalue_threshold 5e-8 --maf_threshold 0.01 --infer_s
 """
 
 import argparse
@@ -60,6 +61,7 @@ def parse_arguments(argv=None):
     parser.add_argument("--true_rbeta_col", type=str, default=None, help="Column name for beta values")
     parser.add_argument("--sfs_pile", type=str, choices=['eur', 'jpt'], default='eur', help="SFS pile option: 'eur' or 'jpt' (default: eur)")
     parser.add_argument("--explicit_pvalue_filter", action="store_true", help="Whether to explicitly filter by p-value threshold")
+    parser.add_argument("--infer_s", action="store_true", help="Fit the single s model in addition to the others")
     return parser.parse_args(argv)
 
 def print_usage():
@@ -166,6 +168,21 @@ def main(argv=None):
     I2_full = 10.0 ** float(r.x[1])
     rows.append(("full", f"I1={I1_full:.6g}, I2={I2_full:.6g}",
                 -float(r.fun), bool(r.success), getattr(r, "nit", "-")))
+
+    if args.infer_s:
+        s_result = sstats.infer_s(
+            sfs_pile,
+            10000,
+            raf_keep,
+            rbeta_keep,
+            v_cut,
+            min_x=args.maf_threshold,
+            n_points=1000,
+            n_x=1000,
+            beta_obs=rbeta_post_keep,
+        )
+        s_val = 10.0 ** _as_float(s_result.x)
+        rows.append(("s", f"s={s_val:.6g}", -float(s_result.fun), bool(s_result.success), getattr(s_result, "nit", "-")))
 
     w_model, w_params, w_ll, w_success, w_nit = 6, 42, 12, 8, 6
 

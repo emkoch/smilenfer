@@ -2354,6 +2354,19 @@ def infer_all_standard(sfs_pile, Ne, raf, beta, v_cutoff, min_x=0.01, n_points=1
     results["full_effects"] = infer_full(sfs_pile, Ne, raf, beta, v_cutoff, min_x=min_x, n_x=n_x, beta_obs=beta_obs)
     return results
 
+def infer_s(sfs_pile, Ne, raf, beta, v_cutoff, min_x=0.01, n_points=1000, n_x=1000, beta_obs=None, ud=False):
+    if ud:
+        global_x, SS, tau = build_simple_grid(sfs_pile, min_x, n_points)
+    else:
+        global_x, SS, tau = build_integration_grid_s(sfs_pile, min_x, n_points)
+    raf, beta, beta_obs = filter_vars_vcutoff(raf, beta, v_cutoff, beta_obs)
+    d_x_set = np.maximum(discov_x(beta if beta_obs is None else beta_obs, v_cutoff), min_x)
+    def neg_ll(log10_s):
+        return -total_ll(global_x, tau.T, SS, Ne, beta, raf, v_cutoff, min_x, n_x, ss=10**log10_s, d_x_set=d_x_set)
+    
+    res = minimize(neg_ll, x0=-6, bounds=[(-8,2)], method="Nelder-Mead")
+    
+    return res
 
 def case_deletion_deviation(sfs_pile, Ne, raf, beta, v_cutoff, model="I2", min_x=0.01, 
                             n_points=1000, n_x=1000, beta_obs=None):

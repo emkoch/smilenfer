@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 import scipy.stats
+import scipy.special
 from sklearn.linear_model import LinearRegression
 from . import simulation as sim
 from . import statistics as smile_stats
@@ -31,6 +32,28 @@ def _plot_params():
     matplotlib.rcParams.update({'axes.facecolor': 'white'})
 
 _plot_params()
+
+def stable_chi2_log10sf(x, df):
+    x = np.asarray(x)
+    ln_sf = scipy.stats.chi2.logsf(x, df)
+    if ln_sf.ndim == 0:
+        if np.isfinite(ln_sf):
+            return ln_sf / np.log(10)
+        a = df / 2.0
+        z = x / 2.0
+        # Use asymptotic form when log survival function underflows
+        asym_ln = (a - 1.0) * np.log(z) - z - scipy.special.gammaln(a)
+        corr = 1.0 + (a - 1.0) / z
+        return asym_ln / np.log(10) + np.log10(corr)
+    out = np.empty_like(ln_sf)
+    mask = np.isfinite(ln_sf)
+    out[mask] = ln_sf[mask] / np.log(10)
+    a = df / 2.0
+    z = x[~mask] / 2.0
+    asym_ln = (a - 1.0) * np.log(z) - z - scipy.special.gammaln(a)
+    corr = 1.0 + (a - 1.0) / z
+    out[~mask] = asym_ln / np.log(10) + np.log10(corr)
+    return out
 
 def plot_se_raf(raf, se, trait_name="", ax_given=None):
     if ax_given is None:
@@ -223,6 +246,333 @@ def sim_plot(raf_true, raf_sim, beta_hat, beta_true_sim, figsize=(8, 9)):
     ax.set_xlabel(r"$x$")
     ax.set_ylabel(r"$\beta$")
     return fig, ax
+
+def plot_ML_table_3(ML_table, trait_groups, trait_group_labels, trait_names,
+                      ss=100, logy=False, pval=False, 
+                      kill_offset=False, kill_full=False, ML_table_2=None, ML_table_samples=None, main_title=None):
+    """
+    Plot maximum likelihood tables with different models for each trait group.
+
+    Parameters
+    ----------
+    ML_table : pd.DataFrame
+        The main maximum likelihood table containing likelihoods and statistics.
+    ML_table_2 : pd.DataFrame, optional
+        An additional maximum likelihood table for comparison.
+    ML_table_samples: pd.DataFrame, optional
+        A table containing estimates for a larger number of samples.
+    """
+    # -- CONFIGURE PLOTTING PARAMETERS --
+    trait_mult = 1.5
+    model_order = ["dir", "stab", "full", "plei"]
+    # Define markers and colors for each model
+    marker_dir, marker_stab, marker_full, marker_plei = ">", "s", "D", "o"
+    c_dir, c_stab, c_full, c_plei = "#FFB000", "#DC267F", "#785EF0", "#FE6100"
+    def darken_color(color, factor=0.8):
+        rgb = matplotlib.colors.to_rgb(color)
+        return tuple(x * factor for x in rgb)
+    c_dir_dark = darken_color(c_dir)
+    c_stab_dark = darken_color(c_stab)
+    c_full_dark = darken_color(c_full)
+    c_plei_dark = darken_color(c_plei)
+
+    matplotlib.rcParams.update({'figure.facecolor': 'white', 'axes.facecolor': 'white'})
+    main_heavy_alpha = 0.5
+    main_alpha = 0.2
+    edge_multiplier = 1.0
+    # Work on copies of all the tables
+    if "sample" in ML_table.columns:
+        if np.max(ML_table["sample"]) > 0:
+            ML_table_samples = ML_table.copy()
+            main_heavy_alpha = 0
+            main_alpha = 0 
+            edge_multiplier = 0
+    
+    ML_tmp = ML_table.copy()
+    if ML_table_2 is not None:
+        ML_tmp_2 = ML_table_2.copy()
+    if ML_table_samples is not None:
+        ML_tmp_samples = ML_table_samples.copy()
+
+    group_sizes = [len(group) for group in trait_groups.values()] # size of each trait group
+    trait_cats = list(trait_groups.keys())                        # each category of traits
+    n_traits = sum(group_sizes)                                   # total number of traits
+    
+    available_models = [cc[3:] for cc in ML_table.columns.tolist() if cc.startswith("ll_")]  # all available models in the ML table
+    print(ML_table.columns.tolist())
+    print(f"Available models: {available_models}")
+    if "neut" not in available_models or len(available_models) == 1:
+        raise ValueError("The ML table must contain a 'll_neut' column for the neutral model so that comparisons can be made.")
+    if ML_table_2 is not None:
+        missing_cols = [col for col in available_models if "ll_" + col not in ML_table_2.columns]
+        if missing_cols:
+            raise ValueError(f"The second ML table is missing required columns: {missing_cols}")
+    if ML_table_samples is not None:
+        missing_cols = [col for col in available_models if "ll_" + col not in ML_table_samples.columns]
+        if missing_cols:
+            raise ValueError(f"The samples ML table is missing required columns: {missing_cols}")
+        
+    if kill_full and "full" in available_models:
+        available_models.remove("full")
+
+    # reorder available models to match the predefined model_order
+    plot_models = [m for m in model_order if m in available_models]
+
+    # DEFINE THE FIGURE OBJECT AND PLOT LAYOUT
+    ncols = len(trait_groups) - 1 + n_traits
+    fig, axes = plt.subplots(nrows=1, ncols=ncols, sharey=True,
+                             figsize=(max(n_traits * trait_mult, 6), 6))
+    
+    if main_title is not None:
+        # put it near the upper‑right corner so it clears the y‑axis label
+        fig.text(
+            0.97,          # x‑position in figure coords (0‑1); tweak as needed
+            0.98,          # y‑position
+            main_title,
+            ha="right", va="top", fontsize=24,
+        )
+        plt.subplots_adjust(top=0.92)
+
+    if kill_offset:
+        offset_small = offset_large = 0
+    else:
+        offset_small = 0.3 / 3
+        offset_large = 0.3
+
+    if len(trait_groups) == 1:
+        print("Only one trait group")
+
+    def extract_val(val):
+        return np.mean(val) if isinstance(val, list) else val
+
+    def plot_stat(ax, x, raw_val, marker, c, edgec, s, lw, heavy_alpha=0.5, dist_alpha=0.2, label=None):
+        if isinstance(raw_val, list):
+            for v in raw_val:
+                ax.scatter(x, v, marker=marker, c=c, s=s * 0.8,
+                           edgecolors=edgec, linewidths=lw * 0.67, alpha=dist_alpha)
+        agg_val = extract_val(raw_val)
+        h = ax.scatter(x, agg_val, marker=marker, c=c, s=s,
+                       edgecolors=edgec, linewidths=lw, label=label)
+        h.set_facecolor(matplotlib.colors.to_rgb(c) + (heavy_alpha,))
+        return h
+
+    # Process likelihood columns for ML_tmp tables
+    # This is basically doubling and adjusting for the number of parameters
+    # Note: propogates Nans as is, which leads to removal on plotting
+    for model in available_models:
+        ll_col = f"ll_{model}"
+        adjust = 0 if model == "neut" else (2 if model == "full" else 1)
+        if pval:
+            adjust = 0
+        # ML_tmp[ll_col] = ML_tmp[ll_col].fillna(-1e10)
+        ML_tmp[ll_col] = -(2 * adjust - 2 * ML_tmp[ll_col].to_numpy())
+        if ML_table_2 is not None:
+            # ML_tmp_2[ll_col] = ML_tmp_2[ll_col].fillna(-1e10)
+            ML_tmp_2[ll_col] = -(2 * adjust - 2 * ML_tmp_2[ll_col].to_numpy())
+        if ML_table_samples is not None:
+            # ML_tmp_samples[ll_col] = ML_tmp_samples[ll_col].fillna(-1e10)
+            ML_tmp_samples[ll_col] = -(2 * adjust - 2 * ML_tmp_samples[ll_col].to_numpy())
+    
+    # Compute stat_ columns for ML_tmp and ML_tmp_2
+    for model in plot_models: # now use plot models b/c we don't plot "neut"
+        stat_col = f"stat_{model}"
+        if not pval: # use AIC-like statistics
+            ML_tmp[stat_col] = (ML_tmp[f"ll_{model}"] - ML_tmp["ll_neut"])
+            if ML_table_2 is not None:
+                ML_tmp_2[stat_col] = (ML_tmp_2[f"ll_{model}"] - ML_tmp_2["ll_neut"])
+            if ML_table_samples is not None:
+                ML_tmp_samples[stat_col] = (ML_tmp_samples[f"ll_{model}"] - ML_tmp_samples["ll_neut"])
+        else: # use p-values
+            df = 2 if model == "full" else 1
+            ML_tmp[stat_col] = -stable_chi2_log10sf(ML_tmp[f"ll_{model}"] - ML_tmp["ll_neut"], df)
+            if ML_table_2 is not None:
+                ML_tmp_2[stat_col] = -stable_chi2_log10sf(ML_tmp_2[f"ll_{model}"] - ML_tmp_2["ll_neut"], df)
+            if ML_table_samples is not None:
+                ML_tmp_samples[stat_col] = -stable_chi2_log10sf(ML_tmp_samples[f"ll_{model}"] - ML_tmp_samples["ll_neut"], df)
+
+    # Determine y-axis maximum using ML_tmp and ML_tmp_2
+    all_ML = np.concatenate([ML_tmp[f"ll_{model}"] - ML_tmp["ll_neut"]
+                             for model in plot_models if f"ll_{model}" in ML_tmp.columns])
+    if ML_table_2 is not None:
+        all_ML_2 = np.concatenate([ML_tmp_2[f"ll_{model}"] - ML_tmp_2["ll_neut"]
+                                   for model in plot_models if f"ll_{model}" in ML_tmp_2.columns])
+        all_ML = np.concatenate([all_ML, all_ML_2])
+    y_max = np.max(all_ML)
+    y_min = np.min(all_ML)
+    if ML_table_2 is not None:
+        y_max = max(y_max, np.max(all_ML_2))
+        y_min = min(y_min, np.min(all_ML_2))
+
+    # Configure y-axis
+    if not pval:
+        if logy:
+            axes[0].set_ylim(-0.2, y_max * 1.2)
+            axes[0].set_yscale("symlog", linthresh=4)
+            ticks = [0, 2.] + list(5 * 2 ** np.arange(0, np.log2(y_max / 5)))
+            axes[0].set_yticks(ticks)
+            axes[0].set_yticklabels(["<0", 2.] + list(5 * 2 ** np.arange(0, np.log2(y_max / 5))))
+        else:
+            if y_min < 0:
+                lower = y_min * 1.2
+            else:
+                lower = -1 / np.log(10)
+            axes[0].set_ylim(lower, y_max * 1.2)
+            # y1, y2 = axes[0].get_ylim()
+            # if y1 > 0:
+            #     y1 = -1 / np.log(10)
+            # axes[0].set_ylim(y1, y2)
+            axes[0].set_yscale("symlog", linthresh=10)
+        axes[0].set_ylabel(r"$-\Delta \mathrm{AIC}_{\mathrm{model} - \mathrm{neut}}$")
+    else:
+        axes[0].set_yscale("symlog", linthresh=10)
+        ticks = [2.] + list(5 * 2 ** np.arange(0, np.log2(20 / 5)))
+        axes[0].set_yticks(ticks)
+        axes[0].set_yticklabels([2.] + list(5 * 2 ** np.arange(0, np.log2(20 / 5))))
+        axes[0].set_ylabel(r"$-\log_{10} \mathrm{p-value}$")
+
+    # --- Plotting loop for each trait ---
+    ax_index = 0
+    for trait_cat in trait_cats:
+        for trait in trait_groups[trait_cat]:
+            ax = axes[ax_index]
+            ax.set_xlim([-0.5, 0.5])
+            ax.set_xticks([0])
+            ax.set_xticklabels([trait_names[trait]])
+            ax.tick_params(axis="x", labelrotation=80)
+
+            # Draw reference horizontal lines
+            for y_val, style, color, label in (
+                (0, "--", "slategrey", "zero"),
+                (-np.log10(0.05), "--", "palevioletred", "Nominal Sig."),
+                (-np.log10(0.05 / len(trait_names)), "--", "darkorchid", "Adjusted Sig.")
+            ):
+                ax.axhline(y=y_val, linestyle=style, linewidth=1.5,
+                           color=color, alpha=0.8, label=label)
+
+            # Select data for current trait and fit from primary table
+            ML_trait = ML_tmp.loc[(ML_tmp.trait == trait)]
+            if ML_table_2 is not None:
+                ML_trait_2 = ML_tmp_2.loc[(ML_tmp_2.trait == trait)]
+
+            # Plot points from sampling tables if provided
+            if ML_table_samples is not None:
+                ML_trait_samples = ML_tmp_samples.loc[(ML_tmp_samples.trait == trait)]
+                if not ML_trait_samples.empty:
+                    for _, row in ML_trait_samples.iterrows():
+                        for model in plot_models:
+                            
+                            if model == "dir":
+                                edge_light = matplotlib.colors.to_rgba(c_dir_dark, 0.25)
+                                plot_stat(ax, -offset_large, row[f"stat_{model}"], marker_dir, c_dir, edge_light, ss*0.7, 0.5,
+                                          heavy_alpha=0, dist_alpha=0.2)
+                            elif model == "stab":
+                                edge_light = matplotlib.colors.to_rgba(c_stab_dark, 0.25)
+                                plot_stat(ax, -offset_small, row[f"stat_{model}"], marker_stab, c_stab, edge_light, ss*0.7, 0.5,
+                                          heavy_alpha=0, dist_alpha=0.2)
+                            elif model == "full" and not kill_full:
+                                edge_light = matplotlib.colors.to_rgba(c_full_dark, 0.25)
+                                plot_stat(ax, offset_small, row[f"stat_{model}"], marker_full, c_full, edge_light, ss*0.7, 0.5,
+                                          heavy_alpha=0, dist_alpha=0.2)
+                            elif model == "plei":
+                                edge_light = matplotlib.colors.to_rgba(c_plei_dark, 0.25)
+                                plot_stat(ax, offset_large, row[f"stat_{model}"], marker_plei, c_plei, edge_light, ss*0.7, 0.5,
+                                          heavy_alpha=0, dist_alpha=0.2)
+
+            for model in plot_models:
+                if model == "dir":
+                    dir_h = plot_stat(ax, -offset_large, ML_trait[f"stat_{model}"].values[0], marker_dir, c_dir, 
+                                      matplotlib.colors.to_rgba(c_dir_dark, edge_multiplier), ss, 
+                                      2.5, heavy_alpha=main_heavy_alpha, dist_alpha=main_alpha, label="Directional")
+                elif model == "stab":
+                    stab_h = plot_stat(ax, -offset_small, ML_trait[f"stat_{model}"].values[0], marker_stab, c_stab, 
+                                       matplotlib.colors.to_rgba(c_stab_dark, edge_multiplier), ss,
+                                       2.5, heavy_alpha=main_heavy_alpha, dist_alpha=main_alpha, label="Single-trait Stabilizing")
+                elif model == "full" and not kill_full:
+                    full_h = plot_stat(ax, offset_small, ML_trait[f"stat_{model}"].values[0], marker_full, c_full, 
+                                       matplotlib.colors.to_rgba(c_full_dark, edge_multiplier), ss,
+                                       2.5, heavy_alpha=main_heavy_alpha, dist_alpha=main_alpha, label="Dir. + 1-D Stab.")
+                elif model == "plei":
+                    plei_h = plot_stat(ax, offset_large, ML_trait[f"stat_{model}"].values[0], marker_plei, c_plei, 
+                                       matplotlib.colors.to_rgba(c_plei_dark, edge_multiplier), ss, 2.5, 
+                                       heavy_alpha=main_heavy_alpha, dist_alpha=main_alpha, label="Pleiotropic Stabilizing")
+
+            # Plot secondary table points if provided
+            if ML_table_2 is not None:
+                for model in plot_models:
+                    if model == "dir":
+                        raw_dir_2  = ML_trait_2["stat_dir"].values[0]  if "stat_dir" in ML_trait_2.columns  else 0
+                        plot_stat(ax, -offset_large, raw_dir_2, marker_dir, c_dir, c_dir_dark, ss, 0, dist_alpha=0.)
+                    elif model == "stab":
+                        raw_stab_2 = ML_trait_2["stat_stab"].values[0] if "stat_stab" in ML_trait_2.columns  else 0
+                        plot_stat(ax, -offset_small, raw_stab_2, marker_stab, c_stab, c_stab_dark, ss, 0, dist_alpha=0.)
+                    elif model == "full" and not kill_full:
+                        raw_full_2 = ML_trait_2["stat_full"].values[0] if "stat_full" in ML_trait_2.columns else 0
+                        plot_stat(ax, offset_small, raw_full_2, marker_full, c_full, c_full_dark, ss, 0, dist_alpha=0.)
+                    elif model == "plei":
+                        raw_plei_2 = ML_trait_2["stat_plei"].values[0] if "stat_plei" in ML_trait_2.columns else 0
+                        plot_stat(ax, offset_large, raw_plei_2, marker_plei, c_plei, c_plei_dark, ss, 0, dist_alpha=0.)
+
+            ax.grid(axis="x", which="both", linestyle="--", linewidth=1, color="black", alpha=0.0)
+            ax_index += 1
+
+        if ax_index < len(axes):
+            fig.delaxes(axes[ax_index])
+            ax_index += 1
+
+    # Add titles over trait groups
+    pos_index = 0
+    for i, trait_cat in enumerate(trait_cats):
+        trait_group = trait_groups[trait_cat]
+        first_ax, last_ax = axes[pos_index], axes[pos_index + len(trait_group) - 1]
+        pos_index += len(trait_group) + 1
+        x_center = (first_ax.get_position().x0 + last_ax.get_position().x1) / 2
+        y_top = first_ax.get_position().y1
+        fig.text(x_center, y_top, trait_group_labels[i], ha="center", va="bottom", fontsize=22)
+
+    # Create legends (adjusted for kill_full flag)
+    if not kill_full:
+        legend1 = axes[-1].legend(
+            handles=[dir_h, stab_h, full_h, plei_h],
+            labels=["Directional", "1‑D stab.", "Dir+stab", "Pleiotropic"],
+            loc="upper left",
+             bbox_to_anchor=(1.02, 0.80),   # move it up
+            title="Selection model"
+        )
+    else:
+        legend_handles, legend_labels = [], []
+        if 'dir_h' in locals():
+            legend_handles.append(dir_h)
+            legend_labels.append("Single s")
+        if 'stab_h' in locals():
+            legend_handles.append(stab_h)
+            legend_labels.append("Single-trait Stabilizing")
+        if 'plei_h' in locals():
+            legend_handles.append(plei_h)
+            legend_labels.append("Pleiotropic Stabilizing")
+        legend1 = axes[-1].legend(
+            labels=legend_labels, handles=legend_handles,
+            loc="upper left",
+            bbox_to_anchor=(1.02, 0.80),   # move it up
+            title="Selection model"
+        )
+
+    fig.canvas.draw()
+    bb = legend1.get_window_extent(fig.canvas.get_renderer()).transformed(ax.transAxes.inverted())
+    y2 = bb.y0 - 0.02  # small gap
+
+    # significance legend (placed just below legend1)
+    legend2 = ax.legend(
+        labels=[r"Neutral model", r"Nominal significance", r"Adjusted significance"],
+        loc="upper left",
+        bbox_to_anchor=(1.02, y2),
+        ncol=1,
+        bbox_transform=ax.transAxes,
+    )
+
+    ax.add_artist(legend1)
+    legend1.set_title("Selection model", prop={'weight': 'bold'})
+
+    return fig, axes
 
 def plot_smile_fit(raf, beta_hat, beta_post, v_cut, model, params, WF_pile=None, min_x=0.01, hat_as_true=False,
                    figsize=(8, 9), title=None, ylabel=r"$\beta$", xlabel="raf",  point_size=120,

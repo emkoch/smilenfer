@@ -1,5 +1,4 @@
 import os
-import numpy as np
 import pandas as pd
 import smilenfer.plotting as splot
 
@@ -53,7 +52,7 @@ fig.savefig("original_trait_pval.pdf", bbox_inches='tight')
 
 
 # BBJ traits
-fit_dir = "../bbj/"
+fit_dir = "../all_opt_fits/bbj/"
 fits_bbj_pval = pd.read_csv(os.path.join(fit_dir, "opt_results_pval_bbj.csv"))
 fits_bbj_high = pd.read_csv(os.path.join(fit_dir, "opt_results_high_bbj.csv"))
 fits_bbj_random = pd.read_csv(os.path.join(fit_dir, "opt_results_random_bbj.csv"))
@@ -87,7 +86,7 @@ fig.savefig("bbj_trait_pval.pdf", bbox_inches='tight')
 
 
 # MVP finemapping traits
-fit_dir = "../mvp/"
+fit_dir = "../all_opt_fits/mvp/"
 fits_mvp = pd.read_csv(os.path.join(fit_dir, "opt_results_mvp_finemapping_eur.csv"))
 traits_groups = {"Disease": ["Atrial fibrillation", "Basal cell carcinoma", "Cancer of prostate", "Coronary atherosclerosis",
                              "Diverticulosis and diverticulitis", "Glaucoma", "Gout", "Hyperlipidemia", 
@@ -114,7 +113,7 @@ fig, ax = splot.plot_ML_table_3(fits_mvp, traits_groups, trait_group_labels, tra
 fig.savefig("mvp_trait_pval.pdf", bbox_inches='tight')
 
 # Original traits with MVP matched effects
-fit_dir = "../mvp/matching/"
+fit_dir = "../all_opt_fits/mvp/matching/"
 fits_mvp_matched_eur = pd.read_csv(os.path.join(fit_dir, "opt_results_mvp_matching_eur.csv"))
 fits_mvp_matched_afr = pd.read_csv(os.path.join(fit_dir, "opt_results_mvp_matching_afr.csv"))
 fits_mvp_matched_amr = pd.read_csv(os.path.join(fit_dir, "opt_results_mvp_matching_amr.csv"))
@@ -164,7 +163,7 @@ fig, axes = splot.plot_ML_table_3(fits_mvp_matched_meta, traits_groups, trait_gr
 fig.savefig("mvp_matched_meta_trait_pval.pdf", bbox_inches='tight')
 
 # UKBB susiex
-fit_dir = "../ukbb_fine_mapping/"
+fit_dir = "../all_opt_fits/ukbb_finemapping/"
 fits_susiex = pd.read_csv(os.path.join(fit_dir, "opt_results_ukbb_susiex.csv"))
 
 traits_groups = {"Quantitative": ["bmi", "dbp", "hdl", "height", "ldl", "sbp", "triglycerides", "wbc"]}

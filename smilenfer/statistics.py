@@ -2322,6 +2322,43 @@ def infer_Ip(sfs_pile, Ne, raf, beta, v_cutoff,
     res = minimize(neg_ll, x0=x0, bounds=[(-8, max_bound)], method="Nelder-Mead")
     return res
 
+def infer_Ir(sfs_pile, Ne, raf, beta, v_cutoff, min_x=0.01, n_points=1000, n_x=1000, beta_obs=None, II_init=-2, rr_init=2):
+    """
+    Puts everything together: builds the grids and performs MLE inference for I_2.
+    Returns the OptimizeResult from scipy.optimize.minimize.
+    """
+    global_x, S_ud, tau = build_simple_grid(sfs_pile, min_x, n_points)
+    raf, beta, beta_obs = filter_vars_vcutoff(raf, beta, v_cutoff, beta_obs)
+    d_x_set = np.maximum(discov_x(beta if beta_obs is None else beta_obs, v_cutoff), min_x)
+    
+    def neg_ll(log10_Ir_rr):
+        log10_Ir, rr = log10_Ir_rr
+        return -total_ll(global_x, tau.T, S_ud, Ne, beta, raf, v_cutoff, min_x, n_x, II=10**log10_Ir, rr=rr, d_x_set=d_x_set)
+    
+    res = minimize(neg_ll, x0=[II_init, rr_init], bounds=[(-8,2), (0,10)], method="Nelder-Mead")
+    return res
+
+def infer_Ipr(sfs_pile, Ne, raf, beta, v_cutoff, min_x=0.01, n_points=1000, n_x=1000, beta_obs=None, II_init=-3, rr_init=2):
+    """
+    Puts everything together: builds the grids and performs MLE inference for I_p.
+    Returns the OptimizeResult from scipy.optimize.minimize.
+    """
+    global_x, _, _, S_p, int_grid = build_integration_grid(sfs_pile, min_x, n_points)
+    raf, beta, beta_obs = filter_vars_vcutoff(raf, beta, v_cutoff, beta_obs)
+    d_x_set = np.maximum(discov_x(beta if beta_obs is None else beta_obs, v_cutoff), min_x)
+    
+    def neg_ll(log10_Ip_rr):
+        log10_Ip, rr = log10_Ip_rr
+        return -total_ll(global_x, int_grid, S_p, Ne, beta, raf, v_cutoff, min_x, n_x, II=10**log10_Ip, rr=rr, d_x_set=d_x_set)
+    
+    max_bound = np.log10(S_p[-1] / (2 * Ne * np.median(beta**2)))
+    res = minimize(neg_ll, x0=[II_init, rr_init], bounds=[(-8, max_bound), (0, 10)], method="Nelder-Mead")
+    # check wheter first parameter hit the upper bound and print a warning
+    if res.x[0] >= max_bound:
+        print("Warning: I_p hit the hard-coded upper bound for r=2.")
+        print(f"  I_p: {10**res.x[0]}, rr: {res.x[1]}")
+    return res
+
 def infer_I1(sfs_pile, Ne, raf, beta, v_cutoff, min_x=0.01, n_points=1000, n_x=1000, beta_obs=None):
     global_x, SS, tau = build_integration_grid_dir(sfs_pile, min_x, n_points)
     raf, beta, beta_obs = filter_vars_vcutoff(raf, beta, v_cutoff, beta_obs)

@@ -1,0 +1,167 @@
+import os
+from glob import glob
+
+DATA_DIR        = os.path.join("..", "data", "final", "original_traits")
+SFS_PILE        = os.path.join("..", "data", "SFS_pile", "tenn_eur_pile.pkl")
+P_THRESH        = 5e-8
+N_ITERS         = 10000
+SIM_TRUNC       = 1e-8
+PER_TRAIT_DIR   = "per_trait"
+RESULTS_DIR     = "results"
+DROP_COUNTS     = [0, 1, 2, 5]
+
+if not os.path.isdir(DATA_DIR):
+    raise RuntimeError("processed trait directory missing: {}".format(DATA_DIR))
+if not os.path.isfile(SFS_PILE):
+    raise RuntimeError("SFS pile missing: {}".format(SFS_PILE))
+
+PROCESSED_FILES = sorted(glob(os.path.join(DATA_DIR, "processed.*.snps_low_r2.tsv")))
+if not PROCESSED_FILES:
+    raise RuntimeError("no processed.*.snps_low_r2.tsv files under {}".format(DATA_DIR))
+
+def trait_from_fname(path):
+    name = os.path.basename(path)
+    prefix = "processed."
+    suffix = ".snps_low_r2.tsv"
+    if not name.startswith(prefix) or not name.endswith(suffix):
+        raise ValueError("unexpected processed filename: {}".format(name))
+    return name[len(prefix):-len(suffix)]
+
+TRAITS = {trait_from_fname(f): f for f in PROCESSED_FILES}
+TRAIT_LIST = sorted(TRAITS.keys())
+
+rule all:
+    input:
+        os.path.join(RESULTS_DIR, "ir_estimates_all.csv")
+
+rule outlier:
+    input:
+        sumstats=lambda wc: TRAITS[wc.trait],
+        sfs=SFS_PILE
+    output:
+        os.path.join(PER_TRAIT_DIR, "{trait}_outliers.tsv")
+    params:
+        p_thresh=P_THRESH
+    run:
+        import pickle
+        import numpy as np
+        import pandas as pd
+        import scipy.stats as stats
+        import smilenfer.statistics as sstats
+        import smilenfer.simulation as sim
+
+        df      = pd.read_csv(input.sumstats, sep="\t", compression="infer")
+        raf     = df.raf.to_numpy()
+        rbeta   = df.rbeta.to_numpy()
+        var_exp = df.var_exp.to_numpy()
+        n_eff_med = np.nanmedian(df["n_eff"])
+        v_cut   = stats.chi2.isf(params.p_thresh, df=1) / n_eff_med
+        mask    = var_exp > v_cut
+        raf, rbeta = raf[mask], rbeta[mask]
+
+        pile = pickle.load(open(input.sfs, "rb"))
+        pile = sim.truncate_pile(pile, 1e-8)
+
+        deviations = sstats.case_deletion_deviation(
+            pile, N_ITERS, raf, rbeta, v_cut,
+            model="Ip", n_points=1000, n_x=1000
+        )
+
+        df_outliers = df[mask].copy()
+        df_outliers["median_n_eff"] = n_eff_med
+        df_outliers["deviation"] = deviations
+        df_outliers = df_outliers.sort_values("deviation", ascending=False)
+
+        os.makedirs(PER_TRAIT_DIR, exist_ok=True)
+        df_outliers.to_csv(output[0], sep="\t", index=False)
+
+#––– Re-fit after dropping top outliers
+rule estimate:
+    input:
+        tsv=os.path.join(PER_TRAIT_DIR, "{trait}_outliers.tsv")
+    output:
+        os.path.join(RESULTS_DIR, "{trait}_{drop}.csv")
+    params:
+        drop=lambda wc: int(wc.drop)
+    run:
+        import pickle
+        import numpy as np
+        import pandas as pd
+        import scipy.stats as stats
+        import smilenfer.statistics as sstats
+        import smilenfer.simulation as sim
+
+        os.makedirs(os.path.dirname(output[0]), exist_ok=True)
+
+        df = pd.read_csv(input.tsv, sep="\t")
+        if params.drop > 0 and len(df) > params.drop:
+            df = (
+                df
+                .sort_values(["deviation", "var_exp"], ascending=[False, False])
+                .iloc[params.drop:]
+                .reset_index(drop=True)
+            )
+
+        median_n = df["median_n_eff"].iloc[0]
+        v_cut = stats.chi2.isf(P_THRESH, df=1) / median_n
+        mask = df["var_exp"] > v_cut
+        raf = df.loc[mask, "raf"].to_numpy()
+        rbeta = df.loc[mask, "rbeta"].to_numpy()
+
+        pile = pickle.load(open(SFS_PILE, "rb"))
+        pile = sim.truncate_pile(pile, SIM_TRUNC)
+
+        I2  = sstats.infer_I2(pile, N_ITERS, raf, rbeta, v_cut)
+        Ip  = sstats.infer_Ip(pile, N_ITERS, raf, rbeta, v_cut)
+        Ir  = sstats.infer_Ir(
+            pile,
+            N_ITERS,
+            raf,
+            rbeta,
+            v_cut,
+            II_init=Ip.x[0],  # seed log10(II) with Ip MLE
+            rr_init=2,
+        )
+        Ipr = sstats.infer_Ipr(
+            pile,
+            N_ITERS,
+            raf,
+            rbeta,
+            v_cut,
+            II_init=Ip.x[0],  # seed log10(II) with Ip MLE
+            rr_init=2,
+        )
+
+        row = {
+            "trait":      wildcards.trait,
+            "drop_count": params.drop,
+            "I2_LL":     -I2.fun,
+            "Ip_LL":     -Ip.fun,
+            "Ir_LL":     -Ir.fun,
+            "Ipr_LL":    -Ipr.fun,
+            "I2_I2":      10**I2.x[0],
+            "Ip_Ip":      10**Ip.x[0],
+            "Ir_r":       Ir.x[1],
+            "Ir_II":      10**Ir.x[0],
+            "Ipr_r":      Ipr.x[1],
+            "Ipr_II":     10**Ipr.x[0],
+        }
+        pd.DataFrame([row]).to_csv(output[0], index=False)
+
+#––– Gather all drop-count summaries
+rule summarize:
+    input:
+        expand(
+            os.path.join(RESULTS_DIR, "{trait}_{drop}.csv"),
+            trait=TRAIT_LIST,
+            drop=[str(d) for d in DROP_COUNTS],
+        )
+    output:
+        os.path.join(RESULTS_DIR, "ir_estimates_all.csv")
+    run:
+        import os
+        import pandas as pd
+
+        os.makedirs(os.path.dirname(output[0]), exist_ok=True)
+        df = pd.concat([pd.read_csv(f) for f in input], ignore_index=True)
+        df.to_csv(output[0], index=False)

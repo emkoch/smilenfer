@@ -201,6 +201,8 @@ def format_axes(ax, xmin, xmax, ymax):
     ax.set_yticklabels([0, 0.5, 1, 2, 4])
 
 
+"""Unused plotting utilities (kept for reference, not executed).
+
 def plot_by_dropcount(ir_fits, drop_counts, xmin, xmax, ymax, out_dir):
     ncols = 2 if len(drop_counts) > 1 else 1
     nrows = math.ceil(len(drop_counts) / ncols)
@@ -663,6 +665,7 @@ def plot_paths_traitcolors(ir_fits, xmin, xmax, ymax, out_path, annotate_drop=Fa
 
     fig.tight_layout(rect=[0, 0, 0.82, 1])
     fig.savefig(out_path, bbox_inches="tight")
+"""
 
 
 def plot_paths_traitcolors_hists(ir_fits, xmin, xmax, ymax, out_path):

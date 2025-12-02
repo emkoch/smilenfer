@@ -2338,6 +2338,22 @@ def infer_Ir(sfs_pile, Ne, raf, beta, v_cutoff, min_x=0.01, n_points=1000, n_x=1
     res = minimize(neg_ll, x0=[II_init, rr_init], bounds=[(-8,2), (0,10)], method="Nelder-Mead")
     return res
 
+def infer_Ir_rr_fixed(sfs_pile, Ne, raf, beta, v_cutoff, min_x=0.01, n_points=1000,
+                      n_x=1000, beta_obs=None, rr_fixed=0, x0=-2):
+    """
+    Optimize Ir while holding rr fixed (default rr=0).
+    """
+    global_x, S_ud, tau = build_simple_grid(sfs_pile, min_x, n_points)
+    raf, beta, beta_obs = filter_vars_vcutoff(raf, beta, v_cutoff, beta_obs)
+    d_x_set = np.maximum(discov_x(beta if beta_obs is None else beta_obs, v_cutoff), min_x)
+
+    def neg_ll(log10_Ir):
+        return -total_ll(global_x, tau.T, S_ud, Ne, beta, raf, v_cutoff,
+                         min_x, n_x, II=10**log10_Ir, rr=rr_fixed, d_x_set=d_x_set)
+
+    res = minimize(neg_ll, x0=x0, bounds=[(-8, 2)], method="Nelder-Mead")
+    return res
+
 def infer_Ipr(sfs_pile, Ne, raf, beta, v_cutoff, min_x=0.01, n_points=1000, n_x=1000, beta_obs=None, II_init=-3, rr_init=2):
     """
     Puts everything together: builds the grids and performs MLE inference for I_p.
@@ -2487,6 +2503,47 @@ def case_deletion_deviation(sfs_pile, Ne, raf, beta, v_cutoff, model="I2", min_x
 
         if np.isnan(deviance[i]):
             print(f"Warning: variant {i} has invalid model fit.")  
+            print(f"  raf: {raf[i]}, beta: {beta[i]}")
+            raise ValueError("Invalid model fit encountered.")
+    return deviance
+
+def case_deletion_deviation_Ir_rr0(sfs_pile, Ne, raf, beta, v_cutoff, min_x=0.01,
+                                   n_points=1000, n_x=1000, beta_obs=None):
+    """
+    Leave-one-out deviance for the Ir model with rr fixed at 0.
+    """
+    deviance = np.zeros_like(raf, dtype=float)
+    full_fit = infer_Ir_rr_fixed(sfs_pile, Ne, raf, beta, v_cutoff,
+                                 min_x=min_x, n_points=n_points, n_x=n_x,
+                                 beta_obs=beta_obs, rr_fixed=0)
+
+    x0 = full_fit.x
+    n = len(raf)
+    for i in range(n):
+        if ((i + 1) % 10 == 0) or (i + 1 == n):
+            percent = int(100 * (i + 1) / n)
+            print(f"\rLeave-one-out progress: {i + 1}/{n} ({percent}%)", end="", flush=True)
+
+        raf_tmp = np.delete(raf, i)
+        beta_tmp = np.delete(beta, i)
+
+        fit = infer_Ir_rr_fixed(sfs_pile, Ne, raf_tmp, beta_tmp, v_cutoff,
+                                min_x=min_x, n_points=n_points, n_x=n_x,
+                                beta_obs=beta_obs, rr_fixed=0, x0=x0)
+
+        ll_full_tmp = -llhood_Ir(sfs_pile, Ne, raf, beta, v_cutoff,
+                                 10**fit.x[0], rr=0, min_x=min_x,
+                                 n_points=n_points, n_x=n_x, beta_obs=beta_obs)
+
+        _full_fit_fun_val = getattr(full_fit, 'fun', np.nan)
+
+        if np.isnan(ll_full_tmp) or np.isnan(_full_fit_fun_val):
+            deviance[i] = np.nan
+        else:
+            deviance[i] = 2 * (ll_full_tmp - _full_fit_fun_val)
+
+        if np.isnan(deviance[i]):
+            print(f"Warning: variant {i} has invalid model fit.")
             print(f"  raf: {raf[i]}, beta: {beta[i]}")
             raise ValueError("Invalid model fit encountered.")
     return deviance

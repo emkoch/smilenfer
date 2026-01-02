@@ -1,0 +1,33 @@
+All filenames contain a trait and a seed, which are all that is needed to recreate the data from graphld_simulation_maf_differency.ipynb.
+
+IMPORTANT NOTE ABOUT TRAITS
+- We used a traits reported heritability, sample size, and alpha parameter (if available)
+  - For traits with a UK Biobank + Finngen meta-analysis, we used the UK Biobank sample size
+    - This may mean that the simulations have less accurate marginal estimates than the actual data
+- For a given trait, we tried to roughly match two results
+  - The trait's number of independent GWAS hits (using the genome-wide significance threshold of 5e-8)
+  - The range of marginal betas
+- These matches are approximate
+
+Each trait has a file simulated_[trait]_seed_[number]_loci.tsv
+Each row is one SNP: either a causative SNP or a lead SNP (whether causative or not)
+Columns
+- chr: chromosome of the SNP
+- pos: the position of the SNP
+- a1: one allele
+- a2: the other allele
+- snp: ID of the SNP
+- clump: the identifier for each locus on a chromosome (numbers are re-used across chromosomes)
+- causative: whether the SNP is causative (this column is redundant, because it is equivalent to beta != 0, but is kept for convenience)
+- lead: whether the SNP is the lead SNP for its locus (this column is redundant, because it is equivalent to dist_to_lead == 0, but is kept for convenience)
+- secondary_causative: if present, this column indicates causative SNPs that are not lead SNPs, but fall in a locus where the lead SNP is itself causative
+- beta_abs: simulated effect size of the variant (absolute value)
+- beta_marginal_abs: estimated beta marginal (absolute value)
+- raf: risk allele frequency (or trait-increasing allele for continuous traits)
+- p: P-value for the SNPs association with the trait
+- dist_to_lead: distance between the SNP and the lead SNP for this locus
+- n_eff: effective sample size for the GWAS
+- h2: narrow-sense heritability used in the simulate (based on the [citation for Ben's UKBB stuff])
+- alpha: value of the alpha parameter used in the simulation (based on [citation for Armin's paper] and [citation for Loic's paper])
+- frac: the probability that a variant has a causative effect on the trait
+- pop: population simulated

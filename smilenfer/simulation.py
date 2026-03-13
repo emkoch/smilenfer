@@ -625,9 +625,9 @@ def poly_ratio(neut_sfs, sel_sfs, xx):
 
 def truncate_pile(sfs_pile, factor=1e-8):
     """
-    Truncate the selected sfs so that there is never 1/factor more selected sfs than neutral sfs
-    above the derived allele frequency where the ratio is first greater than that factor.
-    Purpose of this is to ignore regions where the sfs is flat some region in the selected sfs
+    Truncate the selected sfs so that there is never more than `factor` times as much selected sfs as neutral sfs
+    above the derived allele frequency where the ratio is first less than or equal to that factor.
+    Purpose of this is to ignore regions where the sfs is flat within some region in the selected sfs
     but it is incredibly unlikely to actually see mutations in that frequency range.
 
     Assuming ~15 million SNPs with frequency > 1% in humans, the factor of 1e-8 corresponds to

@@ -516,7 +516,7 @@ def main():
         xmin,
         xmax,
         ymax,
-        "ir_vs_i2_stab.pdf",
+        "single_trait_r_scaling_pleiotropic_outliers.pdf",
     )
     plot_paths_traitcolors_hists_pleioonly(
         ir_fits,

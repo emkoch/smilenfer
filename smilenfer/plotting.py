@@ -1293,8 +1293,11 @@ def plot_local_neff(neg_log10_pval, n_eff, ax, trait_name=""):
     _plot_params()
     neg_log10_pval = np.array(neg_log10_pval)
     n_eff = np.array(n_eff)
+    finite = np.isfinite(neg_log10_pval) & np.isfinite(n_eff) & (n_eff > 0)
+    neg_log10_pval = neg_log10_pval[finite]
+    n_eff = n_eff[finite]
     gw_sig = neg_log10_pval > -np.log10(5e-08)
-    median_n_eff = np.median(n_eff[gw_sig])
+    median_n_eff = np.nanmedian(n_eff[gw_sig])
     ax.axhline(median_n_eff, color="black", linestyle="--")
     ax.plot(neg_log10_pval[~gw_sig], n_eff[~gw_sig], ".", alpha=0.5)
     ax.plot(neg_log10_pval[gw_sig], n_eff[gw_sig], "o", alpha=0.5, color="red")

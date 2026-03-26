@@ -37,3 +37,10 @@ for trait in data_traits:
 
 splot.plot_basic_smiles(traits, labels, clumped_data_traits, min_x, p_thresh, p_cutoff,
                     plot_name="basic_smiles_bbj_reclumped.pdf", loci_count=True)
+
+high_clumped_data_traits = {}
+for trait in data_traits:
+    high_clumped_data_traits[trait] = sstats.high_clump_trait_data(data_traits[trait], dist=500000)
+
+splot.plot_basic_smiles(traits, labels, high_clumped_data_traits, min_x, p_thresh, p_cutoff,
+                    plot_name="basic_smiles_bbj_highclumped.pdf", loci_count=True)

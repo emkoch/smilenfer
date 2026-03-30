@@ -4,6 +4,7 @@ import math
 import smilenfer.var_dist as vd
 import smilenfer.statistics as smile_stats
 import smilenfer.plotting as splot
+import smilenfer.posterior as post
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib
@@ -12,9 +13,7 @@ splot._plot_params()
 matplotlib.rcParams.update({'font.size': 18})
 plt.rcParams["text.latex.preamble"] = r"\usepackage{amsmath}"
 
-data_dir = "../data"
-
-_, _, _, _, _, _, all_traits, all_labels, data_traits_update = splot.read_trait_files(os.path.join(data_dir, "clumped_ash"))
+all_traits, all_labels, data_traits_update = post.original_trait_files()
 
 # Do some filtering on maf and p-value
 for trait in all_traits:
@@ -113,7 +112,7 @@ def plot_qq(var_fits, title=""):
         ax.plot([np.min(vv_sorted), np.max(vv_sorted)], [np.min(vv_sorted), np.max(vv_sorted)], "--", color="black")
         ax.set_xscale("log")
         ax.set_yscale("log")
-        ax.set_title(trait)
+        ax.set_title(all_labels[i])
         ax.text(0.1, 0.9, r"$\Delta \ell_\mathrm{PLEI-1T}: $" + "{:.1f}".format(-var_fits[trait]["1d_ll"] + var_fits[trait]["hd_ll"]),
                 transform=ax.transAxes, fontsize=20, verticalalignment="top")
 
@@ -141,7 +140,7 @@ def plot_ll_diff(var_fits, var_fits_ash):
                 var_fits[trait]["hd_ll"] - var_fits[trait]["1d_ll"], "-", label="RAW")
         ax.plot(var_fits_ash[trait]["vv_cutoff"], 
                 var_fits_ash[trait]["hd_ll"] - var_fits_ash[trait]["1d_ll"], "-", label="ASH")
-        ax.set_title(trait)
+        ax.set_title(all_labels[i])
         ax.set_xscale("log")
         ax.axvline(p_cutoffs[trait]["5e-08"], color="k", linestyle="--", alpha=0.5)
     for ax in axs[len(all_traits):]:

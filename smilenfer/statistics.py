@@ -1,3 +1,5 @@
+from copy import deepcopy
+
 import numpy as np
 import scipy.stats as stats
 from scipy.optimize import minimize
@@ -2393,6 +2395,194 @@ def infer_full(sfs_pile, Ne, raf, beta, v_cutoff, min_x=0.01, n_x=1000, beta_obs
     res = minimize(neg_ll, x0=[0, -2], bounds=[(-10, 10), (-8, 2)], method="Nelder-Mead")
     return res
 
+def local_maxima_indices(values):
+    out = []
+    for ii in range(1, len(values) - 1):
+        if values[ii] > values[ii - 1] and values[ii] > values[ii + 1]:
+            out.append(ii)
+    return out
+
+def local_minima_indices(values):
+    out = []
+    for ii in range(1, len(values) - 1):
+        if values[ii] < values[ii - 1] and values[ii] < values[ii + 1]:
+            out.append(ii)
+    return out
+
+def coarse_mode_profile(neg_ll, bounds, n_points=81):
+    grid = np.linspace(bounds[0], bounds[1], n_points)
+    ll = np.array([-neg_ll(val) for val in grid])
+    maxima = local_maxima_indices(ll)
+    minima = local_minima_indices(ll)
+    if len(maxima) == 0:
+        first_peak_idx = int(np.nanargmax(ll))
+    else:
+        first_peak_idx = int(maxima[0])
+    minima_after = [idx for idx in minima if idx > first_peak_idx]
+    split_idx = int(minima_after[0]) if len(minima_after) > 0 else None
+    return {
+        "grid": grid,
+        "ll": ll,
+        "first_peak_idx": first_peak_idx,
+        "first_peak_log10": float(grid[first_peak_idx]),
+        "first_peak_ll": float(ll[first_peak_idx]),
+        "split_idx": split_idx,
+        "split_log10": None if split_idx is None else float(grid[split_idx]),
+        "split_ll": None if split_idx is None else float(ll[split_idx]),
+        "n_local_maxima": int(len(maxima)),
+    }
+
+def refit_first_mode(neg_ll, bounds, first_peak_log10, split_log10):
+    upper = split_log10
+    lower = bounds[0]
+    if upper is None or upper <= lower:
+        return first_peak_log10, -neg_ll(first_peak_log10), None
+
+    def wrapped(xx):
+        return neg_ll(np.ravel(xx)[0])
+
+    res = minimize(wrapped, x0=[first_peak_log10], bounds=[(lower, upper)], method="Nelder-Mead")
+    log10_val = float(np.ravel(res.x)[0])
+    ll_val = -wrapped([log10_val])
+    return log10_val, ll_val, res
+
+def correct_first_mode(opt_result, neg_ll, bounds):
+    if opt_result is None or not hasattr(opt_result, "x") or not hasattr(opt_result, "fun"):
+        return opt_result, {
+            "original_I": np.nan,
+            "original_log10_I": np.nan,
+            "original_ll": np.nan,
+            "first_mode_I": np.nan,
+            "first_mode_log10_I": np.nan,
+            "first_mode_ll": np.nan,
+            "changed": False,
+            "first_peak_log10_I": np.nan,
+            "first_peak_ll": np.nan,
+            "split_log10_I": np.nan,
+            "split_ll": np.nan,
+            "n_local_maxima": 0,
+        }
+
+    original_log10_i = float(np.ravel(opt_result.x)[0])
+    original_i = float(10 ** original_log10_i)
+    original_ll = float(-opt_result.fun)
+
+    profile = coarse_mode_profile(neg_ll, bounds)
+    split_log10 = profile["split_log10"]
+    changed = split_log10 is not None and original_log10_i > split_log10
+
+    if not changed:
+        return opt_result, {
+            "original_I": original_i,
+            "original_log10_I": original_log10_i,
+            "original_ll": original_ll,
+            "first_mode_I": original_i,
+            "first_mode_log10_I": original_log10_i,
+            "first_mode_ll": original_ll,
+            "changed": False,
+            "first_peak_log10_I": profile["first_peak_log10"],
+            "first_peak_ll": profile["first_peak_ll"],
+            "split_log10_I": split_log10,
+            "split_ll": profile["split_ll"],
+            "n_local_maxima": profile["n_local_maxima"],
+        }
+
+    first_log10_i, first_ll, refit_res = refit_first_mode(
+        neg_ll,
+        bounds,
+        profile["first_peak_log10"],
+        split_log10,
+    )
+    audit_row = {
+        "original_I": original_i,
+        "original_log10_I": original_log10_i,
+        "original_ll": original_ll,
+        "first_mode_I": float(10 ** first_log10_i),
+        "first_mode_log10_I": float(first_log10_i),
+        "first_mode_ll": float(first_ll),
+        "changed": True,
+        "first_peak_log10_I": profile["first_peak_log10"],
+        "first_peak_ll": profile["first_peak_ll"],
+        "split_log10_I": split_log10,
+        "split_ll": profile["split_ll"],
+        "n_local_maxima": profile["n_local_maxima"],
+    }
+
+    if refit_res is None:
+        corrected_res = deepcopy(opt_result)
+        corrected_res.x = np.array([first_log10_i])
+        corrected_res.fun = -first_ll
+        corrected_res.success = True
+        corrected_res.status = 0
+        corrected_res.message = "first mode coarse replacement"
+        return corrected_res, audit_row
+
+    refit_res.x = np.array([first_log10_i])
+    refit_res.fun = -first_ll
+    return refit_res, audit_row
+
+def correct_all_standard_first_mode(results, sfs_pile, Ne, raf, beta, v_cutoff,
+                                    min_x=0.01, n_points=1000, n_x=1000,
+                                    beta_obs=None, return_audit=False):
+    corrected_results = deepcopy(results)
+
+    i2_audit = {
+        "model": "stab",
+        "original_I": np.nan,
+        "original_log10_I": np.nan,
+        "original_ll": np.nan,
+        "first_mode_I": np.nan,
+        "first_mode_log10_I": np.nan,
+        "first_mode_ll": np.nan,
+        "changed": False,
+        "first_peak_log10_I": np.nan,
+        "first_peak_ll": np.nan,
+        "split_log10_I": np.nan,
+        "split_ll": np.nan,
+        "n_local_maxima": 0,
+    }
+    ip_audit = deepcopy(i2_audit)
+    ip_audit["model"] = "plei"
+
+    if raf is None or beta is None or v_cutoff is None:
+        corrected_results["first_mode_stab_changed"] = False
+        corrected_results["first_mode_plei_changed"] = False
+        if return_audit:
+            return corrected_results, {"stab": i2_audit, "plei": ip_audit}
+        return corrected_results
+
+    global_x_i2, S_ud, tau = build_simple_grid(sfs_pile, min_x, n_points)
+    global_x_ip, _, _, S_p, int_grid = build_integration_grid(sfs_pile, min_x, n_points)
+
+    raf_i2, beta_i2, beta_obs_i2 = filter_vars_vcutoff(raf, beta, v_cutoff, beta_obs)
+    d_x_set_i2 = np.maximum(discov_x(beta_i2 if beta_obs_i2 is None else beta_obs_i2, v_cutoff), min_x)
+
+    def neg_ll_i2(log10_I2):
+        return -total_ll(global_x_i2, tau.T, S_ud, Ne, beta_i2, raf_i2, v_cutoff,
+                         min_x, n_x, II=10 ** log10_I2, d_x_set=d_x_set_i2)
+
+    corrected_i2, i2_audit = correct_first_mode(corrected_results.get("I2_effects"), neg_ll_i2, (-8.0, 2.0))
+    i2_audit["model"] = "stab"
+    corrected_results["I2_effects"] = corrected_i2
+
+    raf_ip, beta_ip, beta_obs_ip = filter_vars_vcutoff(raf, beta, v_cutoff, beta_obs)
+    d_x_set_ip = np.maximum(discov_x(beta_ip if beta_obs_ip is None else beta_obs_ip, v_cutoff), min_x)
+    max_bound = np.log10(S_p[-1] / (2 * Ne * np.median(beta_ip ** 2)))
+
+    def neg_ll_ip(log10_Ip):
+        return -total_ll(global_x_ip, int_grid, S_p, Ne, beta_ip, raf_ip, v_cutoff,
+                         min_x, n_x, II=10 ** log10_Ip, d_x_set=d_x_set_ip)
+
+    corrected_ip, ip_audit = correct_first_mode(corrected_results.get("Ip_effects"), neg_ll_ip, (-8.0, float(max_bound)))
+    ip_audit["model"] = "plei"
+    corrected_results["Ip_effects"] = corrected_ip
+    corrected_results["first_mode_stab_changed"] = bool(i2_audit["changed"])
+    corrected_results["first_mode_plei_changed"] = bool(ip_audit["changed"])
+
+    if return_audit:
+        return corrected_results, {"stab": i2_audit, "plei": ip_audit}
+    return corrected_results
+
 def infer_all_standard(sfs_pile, Ne, raf, beta, v_cutoff, min_x=0.01, n_points=1000, n_x=1000, beta_obs=None):
     """
     Puts everything together: builds the grids and performs MLE inference for all models.
@@ -2609,7 +2799,7 @@ def llhood_full(sfs_pile, Ne, raf, beta, v_cutoff, I1, I2, min_x=0.01, n_x=1000,
 
 def bootstrap_I2(sfs_pile, Ne, raf, beta, v_cutoff, 
                  min_x=0.01, n_points=1000, n_x=1000, beta_obs=None, 
-                 n_boot=1000, ud=True, seed=None):
+                 n_boot=1000, ud=True, first_mode=False, seed=None):
     rng = (np.random.default_rng(seed) if seed is not None
            else np.random.default_rng())
     
@@ -2627,6 +2817,8 @@ def bootstrap_I2(sfs_pile, Ne, raf, beta, v_cutoff,
                          min_x, n_x, 10**log10_I2, d_x_set=d_x_set)
 
     full_res = minimize(neg_ll, x0=-2, bounds=[(-8, 2)], method="Nelder-Mead")
+    if first_mode:
+        full_res, _ = correct_first_mode(full_res, neg_ll, (-8.0, 2.0))
     mle_I2  = 10.0**full_res.x[0]
     boot_est = np.empty(n_boot)
     boot_fits = []
@@ -2639,6 +2831,8 @@ def bootstrap_I2(sfs_pile, Ne, raf, beta, v_cutoff,
                              min_x, n_x, 10**log10_I2, d_x_set=d_x_set[idx])
         boot_res = minimize(neg_ll, x0=np.log10(mle_I2) - np.log10(2), 
                             bounds=[(-8, 2)], method="Nelder-Mead")
+        if first_mode:
+            boot_res, _ = correct_first_mode(boot_res, neg_ll, (-8.0, 2.0))
         boot_fits.append(boot_res)
         boot_est[ii] = 10.0**boot_res.x[0]
 
@@ -2648,7 +2842,7 @@ def bootstrap_I2(sfs_pile, Ne, raf, beta, v_cutoff,
     return boot_fits, boot_est, (lo, np.nanmedian(boot_est), hi)
 
 def bootstrap_Ip(sfs_pile, Ne, raf, beta, v_cutoff, 
-                min_x=0.01, n_points=1000, n_x=1000, beta_obs=None, n_boot=1000, ud=True, seed=None):
+                min_x=0.01, n_points=1000, n_x=1000, beta_obs=None, n_boot=1000, ud=True, first_mode=False, seed=None):
     rng = (np.random.default_rng(seed) if seed is not None
            else np.random.default_rng())
     
@@ -2663,6 +2857,8 @@ def bootstrap_Ip(sfs_pile, Ne, raf, beta, v_cutoff,
 
     max_bound = np.log10(S_p[-1] / (2 * Ne * np.median(beta**2)))
     full_res = minimize(neg_ll, x0=-3, bounds=[(-8, max_bound)], method="Nelder-Mead")
+    if first_mode:
+        full_res, _ = correct_first_mode(full_res, neg_ll, (-8.0, float(max_bound)))
 
     mle_Ip = 10.0**full_res.x[0]
     
@@ -2677,6 +2873,8 @@ def bootstrap_Ip(sfs_pile, Ne, raf, beta, v_cutoff,
                              min_x, n_x, 10**log10_Ip, d_x_set=d_x_set[idx])
         boot_res = minimize(neg_ll, x0=np.log10(mle_Ip) - np.log10(2), 
                             bounds=[(-8, max_bound)], method="Nelder-Mead")
+        if first_mode:
+            boot_res, _ = correct_first_mode(boot_res, neg_ll, (-8.0, float(max_bound)))
         boot_fits.append(boot_res)
         boot_est[ii] = 10.0**boot_res.x[0]
 

@@ -124,6 +124,18 @@ rule fit_one_sample:
             n_x=1000,
             beta_obs=None,
         )
+        opt_result = sstats.correct_all_standard_first_mode(
+            opt_result,
+            sfs_pile_eur,
+            10000,
+            raf_keep,
+            rbeta_keep,
+            v_cut,
+            min_x=MIN_X,
+            n_points=1000,
+            n_x=1000,
+            beta_obs=None,
+        )
         opt_result["sample"] = sample
         opt_result["trait"] = trait
 

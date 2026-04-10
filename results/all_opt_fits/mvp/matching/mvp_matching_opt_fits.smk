@@ -54,29 +54,33 @@ rule fit_trait_pop:
         # local copy of allele‐matching logic
         def process_match_df(df):
             populations = ["EUR","AMR","AFR","META"]
-            # detect OR vs beta
-            if "beta_mvp_EUR" in df.columns:
-                prefix = "beta_mvp_"
-            elif "or_mvp_EUR" in df.columns:
-                prefix = "or_mvp_"
-            else:
-                raise KeyError("neither beta_mvp nor or_mvp found")
-            match = df.rallele.to_numpy() == df.ea_mvp.to_numpy()
             for pp in populations:
-                key = prefix + pp
-                if key not in df.columns:
-                    continue
-                df["rbeta_" + pp] = np.where(
-                    match,
-                    df[key],
-                    -df[key]
-                )
-                df["rbeta_" + pp] = np.abs(df["rbeta_" + pp])
-                df["raf_" + pp] = np.where(
-                    df["rbeta_" + pp] < 0,
-                    1 - df.raf,
-                    df.raf
-                )
+                match_key = "beta_mvp_match_" + pp
+                if match_key in df.columns:
+                    signed = df[match_key].to_numpy(dtype=float)
+                else:
+                    ea_col = "ea_mvp_" + pp if "ea_mvp_" + pp in df.columns else "ea_mvp"
+                    if ea_col not in df.columns:
+                        continue
+                    risk_match = df.rallele.astype(str).to_numpy() == df[ea_col].astype(str).to_numpy()
+                    beta_key = "beta_mvp_" + pp
+                    or_key = "or_mvp_" + pp
+                    if beta_key in df.columns:
+                        raw = df[beta_key].to_numpy(dtype=float)
+                        signed = np.where(risk_match, raw, -raw)
+                    elif or_key in df.columns:
+                        raw = df[or_key].to_numpy(dtype=float)
+                        signed = np.full(len(raw), np.nan)
+                        valid = np.isfinite(raw) & (raw > 0)
+                        signed[valid] = np.where(
+                            risk_match[valid],
+                            raw[valid] - 1.0,
+                            1.0 / raw[valid] - 1.0,
+                        )
+                    else:
+                        continue
+                df["raf_" + pp] = np.where(signed < 0, 1 - df.raf, df.raf)
+                df["rbeta_" + pp] = np.abs(signed)
 
         trait = params.trait
         population   = params.population.upper() # match column names
@@ -106,16 +110,8 @@ rule fit_trait_pop:
         n_eff_med = np.nanmedian(df["median_n_eff"])
         v_cut     = stats.chi2.isf(P_THRESH, df=1) / n_eff_med
 
-        var_exp = (
-            2
-            * df[raf_col].to_numpy()
-            * (1 - df[raf_col].to_numpy())
-            * df[rbeta_col].to_numpy()**2
-        )
-        mask = (
-            (var_exp > v_cut)
-            & df[raf_col].between(MIN_X, 1 - MIN_X)
-        )
+        mask = df["var_exp"].to_numpy() > v_cut
+        mask &= df[raf_col].between(MIN_X, 1 - MIN_X).to_numpy()
 
         raf         = df.loc[mask, raf_col].to_numpy()
         rbeta_mvp   = df.loc[mask, rbeta_col].to_numpy()
@@ -133,6 +129,13 @@ rule fit_trait_pop:
 
         opt = sstats.infer_all_standard(
             sfs, 10_000,
+            raf, rbeta_mvp,
+            stats.chi2.isf(P_THRESH, df=1) / n_eff_med,
+            min_x=MIN_X, n_points=1000, n_x=1000,
+            beta_obs=rbeta_orig
+        )
+        opt = sstats.correct_all_standard_first_mode(
+            opt, sfs, 10_000,
             raf, rbeta_mvp,
             stats.chi2.isf(P_THRESH, df=1) / n_eff_med,
             min_x=MIN_X, n_points=1000, n_x=1000,

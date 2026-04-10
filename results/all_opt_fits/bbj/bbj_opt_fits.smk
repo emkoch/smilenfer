@@ -83,6 +83,12 @@ rule fit_pval:
             min_x=MIN_X, n_points=1000, n_x=1000,
             beta_obs=None
         )
+        opt = sstats.correct_all_standard_first_mode(
+            opt, sfs, 10_000, raf, rbeta,
+            v_cut,
+            min_x=MIN_X, n_points=1000, n_x=1000,
+            beta_obs=None
+        )
         opt["trait"]  = trait
         opt["method"] = "pval"
 
@@ -121,6 +127,12 @@ rule fit_high:
         sfs = sim.truncate_pile(pickle.load(open(input.sfs_pile, "rb")), 1e-8)
         opt = sstats.infer_all_standard(
             sfs, 10000, raf, rbeta,
+            v_cut,
+            min_x=MIN_X, n_points=1000, n_x=1000,
+            beta_obs=None
+        )
+        opt = sstats.correct_all_standard_first_mode(
+            opt, sfs, 10000, raf, rbeta,
             v_cut,
             min_x=MIN_X, n_points=1000, n_x=1000,
             beta_obs=None
@@ -165,6 +177,12 @@ rule fit_random:
         sfs = sim.truncate_pile(pickle.load(open(input.sfs_pile, "rb")), 1e-8)
         opt = sstats.infer_all_standard(
             sfs, 10_000, raf, rbeta,
+            v_cut,
+            min_x=MIN_X, n_points=1000, n_x=1000,
+            beta_obs=None
+        )
+        opt = sstats.correct_all_standard_first_mode(
+            opt, sfs, 10_000, raf, rbeta,
             v_cut,
             min_x=MIN_X, n_points=1000, n_x=1000,
             beta_obs=None
@@ -252,4 +270,3 @@ rule aggregate_random:
 
         df = spost.prepare_data_from_opt_results(opt_results)
         df.to_csv(output[1], index=False)
-

@@ -100,12 +100,36 @@ rule fit_one_sample:
             n_x=1000,
             beta_obs=None,
         )
+        opt_result_raw = sstats.correct_all_standard_first_mode(
+            opt_result_raw,
+            sfs_pile_eur,
+            10000,
+            raf_keep,
+            rbeta_keep,
+            v_cut,
+            min_x=MIN_X,
+            n_points=1000,
+            n_x=1000,
+            beta_obs=None,
+        )
         opt_result_raw["trait"] = trait
 
         with open(output[0], "wb") as f:
             pickle.dump(opt_result_raw, f)
 
         opt_result_post = sstats.infer_all_standard(
+            sfs_pile_eur,
+            10000,
+            raf_keep,
+            rbeta_post_keep,
+            v_cut,
+            min_x=MIN_X,
+            n_points=1000,
+            n_x=1000,
+            beta_obs=rbeta_keep,
+        )
+        opt_result_post = sstats.correct_all_standard_first_mode(
+            opt_result_post,
             sfs_pile_eur,
             10000,
             raf_keep,
@@ -228,7 +252,9 @@ rule bootstrap_one_sample:
                 FINAL_DIR,
                 f"processed.{wc.trait}.snps_low_r2.tsv"
             ),
-            sfs_pile=SFS_PILE
+            sfs_pile=SFS_PILE,
+            fits_raw="{trait}_standard_fits_raw.pkl",
+            fits_post="{trait}_standard_fits_post.pkl"
     output:
         "bootstrap/{trait}_standard_fits_raw_bootstrap.pkl",
         "bootstrap/{trait}_standard_fits_post_bootstrap.pkl"
@@ -263,15 +289,26 @@ rule bootstrap_one_sample:
         rbeta_post_keep = rbeta_post[keep]
 
         sfs_pile_eur = sim.truncate_pile(pickle.load(open(input.sfs_pile, "rb")), 1e-8)
+        fit_raw = pickle.load(open(input.fits_raw, "rb"))
+        fit_post = pickle.load(open(input.fits_post, "rb"))
+
+        raw_stab_first_mode = fit_raw.get("first_mode_stab_changed", False)
+        raw_plei_first_mode = fit_raw.get("first_mode_plei_changed", False)
+        post_stab_first_mode = fit_post.get("first_mode_stab_changed", False)
+        post_plei_first_mode = fit_post.get("first_mode_plei_changed", False)
 
         I2_bs_raw, I2_bs_ests_raw, _ = sstats.bootstrap_I2(sfs_pile_eur, 10000, raf_keep, rbeta_keep, v_cut, 
-                                           n_boot=params.n_bootstraps)
+                                           n_boot=params.n_bootstraps,
+                                           first_mode=raw_stab_first_mode)
         I2_bs_post, I2_bs_ests_post, _ = sstats.bootstrap_I2(sfs_pile_eur, 10000, raf_keep, rbeta_post_keep, v_cut, 
-                                           n_boot=params.n_bootstraps, beta_obs=rbeta_keep)
+                                           n_boot=params.n_bootstraps, beta_obs=rbeta_keep,
+                                           first_mode=post_stab_first_mode)
         Ip_bs_raw, Ip_bs_ests_raw, _ = sstats.bootstrap_Ip(sfs_pile_eur, 10000, raf_keep, rbeta_keep, v_cut, 
-                                           n_boot=params.n_bootstraps)
+                                           n_boot=params.n_bootstraps,
+                                           first_mode=raw_plei_first_mode)
         Ip_bs_post, Ip_bs_ests_post, _ = sstats.bootstrap_Ip(sfs_pile_eur, 10000, raf_keep, rbeta_post_keep, v_cut, 
-                                           n_boot=params.n_bootstraps, beta_obs=rbeta_keep)
+                                           n_boot=params.n_bootstraps, beta_obs=rbeta_keep,
+                                           first_mode=post_plei_first_mode)
         I1_bs_raw, I1_bs_ests_raw, _ = sstats.bootstrap_I1(sfs_pile_eur, 10000, raf_keep, rbeta_keep, v_cut, 
                                            n_boot=params.n_bootstraps)
         I1_bs_post, I1_bs_ests_post, _ = sstats.bootstrap_I1(sfs_pile_eur, 10000, raf_keep, rbeta_post_keep, v_cut, 

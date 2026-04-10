@@ -39,7 +39,8 @@ with open("../data/WF_pile/WF_pile_trunc.pkl", "rb") as f:
     WF_pile = pickle.load(f)
 
 # Read in data for each trait
-_, _, _, _, _, _, all_traits, all_labels, data = splot.read_trait_files(os.path.join(data_dir, "clumped_ash"), fname="clumped.{ash_type}.{trait}.max_r2.tsv")
+_, _, _, _, _, _, all_traits, all_labels, data = splot.read_trait_files(os.path.join(data_dir, "clumped_ash"), 
+                                                                        fname="clumped.{ash_type}.{trait}.max_r2.tsv")
 
 # # Read in parameter estimates for each trait
 ML = pd.read_csv(os.path.join(data_dir, "ML", 

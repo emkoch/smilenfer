@@ -284,19 +284,16 @@ def load_mvp_trait(trait):
 
 
 def get_fit_row_original(trait):
-    # fit_path = os.path.join(FIT_DIR, "original_traits", "opt_results_original_traits_eur_post.csv")
-    fit_path = os.path.join(SCRIPT_DIR, "..", "first_mode_fits", "original_traits", "opt_results_original_traits_eur_post.csv")
+    fit_path = os.path.join(FIT_DIR, "original_traits", "opt_results_original_traits_eur_post.csv")
     fit_df = pd.read_csv(fit_path)
     return fit_df.loc[fit_df["trait"] == trait].iloc[0]
 
 
 def get_fit_row_bbj(trait, fit_type):
     if fit_type == "high":
-        # fit_path = os.path.join(FIT_DIR, "bbj", "opt_results_high_bbj.csv")
-        fit_path = os.path.join(SCRIPT_DIR, "..", "first_mode_fits", "bbj", "opt_results_high_bbj.csv")
+        fit_path = os.path.join(FIT_DIR, "bbj", "opt_results_high_bbj.csv")
     elif fit_type == "pval":
-        # fit_path = os.path.join(FIT_DIR, "bbj", "opt_results_pval_bbj.csv")
-        fit_path = os.path.join(SCRIPT_DIR, "..", "first_mode_fits", "bbj", "opt_results_pval_bbj.csv")
+        fit_path = os.path.join(FIT_DIR, "bbj", "opt_results_pval_bbj.csv")
     else:
         raise ValueError(f"Unsupported BBJ fit type: {fit_type}")
     fit_df = pd.read_csv(fit_path)

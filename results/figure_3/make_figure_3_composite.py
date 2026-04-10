@@ -748,7 +748,7 @@ def load_panel_specs(base_dir):
         PanelSpec(
             panel_id="A",
             title="Disease GWAS",
-            primary=pd.read_csv(fit_root.parent / "first_mode_fits" / "original_traits" / "opt_results_original_traits_eur_post.csv"),
+            primary=pd.read_csv(fit_root / "original_traits" / "opt_results_original_traits_eur_post.csv"),
             trait_groups=individual_gwas_groups,
             trait_group_labels=["Disease"],
             trait_names=original_names,
@@ -758,7 +758,7 @@ def load_panel_specs(base_dir):
         PanelSpec(
             panel_id="B",
             title="UKBB/FinnGen",
-            primary=pd.read_csv(fit_root.parent / "first_mode_fits" / "original_traits" / "opt_results_original_traits_eur_post.csv"),
+            primary=pd.read_csv(fit_root / "original_traits" / "opt_results_original_traits_eur_post.csv"),
             trait_groups=ukbb_finngen_groups,
             trait_group_labels=["Quantitative", "Disease"],
             trait_names=original_names,
@@ -768,7 +768,7 @@ def load_panel_specs(base_dir):
         PanelSpec(
             panel_id="C",
             title="Biobank Japan",
-            primary=pd.read_csv(fit_root.parent / "first_mode_fits" / "bbj" / "opt_results_high_bbj.csv"),
+            primary=pd.read_csv(fit_root / "bbj" / "opt_results_high_bbj.csv"),
             samples=pd.read_csv(fit_root / "bbj" / "opt_results_random_bbj.csv"),
             trait_groups=bbj_groups,
             trait_group_labels=["Quantitative", "Disease"],

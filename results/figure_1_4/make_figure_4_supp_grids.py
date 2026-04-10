@@ -20,7 +20,6 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 RESULTS_DIR = os.path.join(SCRIPT_DIR, "..")
 DATA_DIR = os.path.join(RESULTS_DIR, "data")
 FIT_DIR = os.path.join(RESULTS_DIR, "all_opt_fits")
-FIRST_MODE_FIT_DIR = os.path.join(RESULTS_DIR, "first_mode_fits")
 UKBB_FM_DIR = os.path.join(FIT_DIR, "ukbb_finemapping")
 UKBB_DATA_DIR = os.path.join(DATA_DIR, "final", "UKBB_susiex")
 MVP_DATA_DIR = os.path.join(DATA_DIR, "final", "mvp_finemapping")
@@ -177,13 +176,13 @@ def load_mvp_trait(trait):
 
 
 def get_fit_row_original(trait):
-    fit_path = os.path.join(FIRST_MODE_FIT_DIR, "original_traits", "opt_results_original_traits_eur_post.csv")
+    fit_path = os.path.join(FIT_DIR, "original_traits", "opt_results_original_traits_eur_post.csv")
     fit_df = pd.read_csv(fit_path)
     return fit_df.loc[fit_df["trait"] == trait].iloc[0]
 
 
 def get_fit_row_bbj(trait):
-    fit_path = os.path.join(FIRST_MODE_FIT_DIR, "bbj", "opt_results_high_bbj.csv")
+    fit_path = os.path.join(FIT_DIR, "bbj", "opt_results_high_bbj.csv")
     fit_df = pd.read_csv(fit_path)
     return fit_df.loc[fit_df["trait"] == trait].iloc[0]
 

@@ -9,7 +9,7 @@ import smilenfer.posterior as spost
 splot._plot_params()
 matplotlib.rcParams.update({"font.size": 18})
 
-FIT_FILE = "../first_mode_fits/original_traits/opt_results_original_traits_eur_post.csv"
+FIT_FILE = "../all_opt_fits/original_traits/opt_results_original_traits_eur_post.csv"
 TRAIT_NAMES = spost.original_trait_names
 
 

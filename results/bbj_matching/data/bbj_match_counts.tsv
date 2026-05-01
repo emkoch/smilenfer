@@ -1,0 +1,13 @@
+trait	trait_label	original_fit_loci	matched_loci	unmatched_loci
+bmi	BMI	1078	791	287
+cad	CAD	59	49	10
+dbp	DBP	584	400	184
+hdl	HDL	788	488	300
+height	Height	3260	2034	1226
+ldl	LDL	583	390	193
+rbc	RBC	997	666	331
+sbp	SBP	928	699	229
+scz	SCZ	205	172	33
+t2d	T2D	247	208	39
+triglycerides	Triglycerides	625	417	208
+wbc	WBC	761	557	204

@@ -2,7 +2,7 @@ from copy import deepcopy
 
 import numpy as np
 import scipy.stats as stats
-from scipy.optimize import minimize
+from scipy.optimize import brentq, minimize
 from scipy import sparse
 from scipy.sparse.linalg import spsolve
 import scipy.interpolate as interpolate
@@ -62,6 +62,38 @@ def beta_cutoff_sd(xx, vv, neff):
     beta_cutoff = np.sqrt(vv/(2*xx*(1-xx)))
     beta_sd = np.sqrt(1/(2*neff*xx*(1-xx)))
     return beta_cutoff, beta_sd
+
+###
+def inv_mills(tt):
+    return np.exp(stats.norm.logpdf(tt) - stats.norm.logsf(tt))
+
+###
+def wc_mle_effect(beta_hat, se, threshold):
+    if not np.all(np.isfinite([beta_hat, se, threshold])):
+        return np.nan
+    if beta_hat <= 0 or se <= 0:
+        return 0.0
+
+    def residual(beta):
+        return beta + se*inv_mills((threshold-beta)/se) - beta_hat
+
+    lo = 0.0
+    hi = float(beta_hat)
+    f_lo = residual(lo)
+    f_hi = residual(hi)
+    if np.isfinite(f_lo) and np.isfinite(f_hi) and f_lo <= 0 <= f_hi:
+        res = brentq(residual, lo, hi, xtol=1e-13, rtol=1e-13, maxiter=100)
+        return min(max(float(res), 0.0), beta_hat)
+    if np.isfinite(f_lo) and f_lo > 0:
+        return 0.0
+    return max(float(beta_hat), 0.0)
+
+###
+def wc_effect_thresholds(raf, se, v_cut, p_thresh):
+    z_gws = np.sqrt(stats.chi2.isf(p_thresh, df=1))
+    beta_v_threshold = np.sqrt(v_cut/(2*raf*(1-raf)))
+    beta_p_threshold = z_gws*se
+    return np.maximum(beta_v_threshold, beta_p_threshold), beta_v_threshold, beta_p_threshold
 
 ###
 def trad_x_set(min_x, n_points):

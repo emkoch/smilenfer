@@ -1,33 +1,32 @@
 import os
 from glob import glob
 
-DATA_DIR        = os.path.join("..", "data", "final", "original_traits")
 SFS_PILE        = os.path.join("..", "data", "SFS_pile", "tenn_eur_pile.pkl")
 P_THRESH        = 5e-8
 N_ITERS         = 10000
 SIM_TRUNC       = 1e-8
+INPUT_DIR       = "per_trait"
 PER_TRAIT_DIR   = "per_trait_rr0"
 RESULTS_DIR     = "results_rr0"
 DROP_COUNTS     = [0, 1, 2, 5]
 
-if not os.path.isdir(DATA_DIR):
-    raise RuntimeError("processed trait directory missing: {}".format(DATA_DIR))
+if not os.path.isdir(INPUT_DIR):
+    raise RuntimeError("per-trait input directory missing: {}".format(INPUT_DIR))
 if not os.path.isfile(SFS_PILE):
     raise RuntimeError("SFS pile missing: {}".format(SFS_PILE))
 
-PROCESSED_FILES = sorted(glob(os.path.join(DATA_DIR, "processed.*.snps_low_r2.tsv")))
-if not PROCESSED_FILES:
-    raise RuntimeError("no processed.*.snps_low_r2.tsv files under {}".format(DATA_DIR))
+INPUT_FILES = sorted(glob(os.path.join(INPUT_DIR, "*_outliers.tsv")))
+if not INPUT_FILES:
+    raise RuntimeError("no *_outliers.tsv files under {}".format(INPUT_DIR))
 
 def trait_from_fname(path):
     name = os.path.basename(path)
-    prefix = "processed."
-    suffix = ".snps_low_r2.tsv"
-    if not name.startswith(prefix) or not name.endswith(suffix):
-        raise ValueError("unexpected processed filename: {}".format(name))
-    return name[len(prefix):-len(suffix)]
+    suffix = "_outliers.tsv"
+    if not name.endswith(suffix):
+        raise ValueError("unexpected per-trait filename: {}".format(name))
+    return name[:-len(suffix)]
 
-TRAITS = {trait_from_fname(f): f for f in PROCESSED_FILES}
+TRAITS = {trait_from_fname(f): f for f in INPUT_FILES}
 TRAIT_LIST = sorted(TRAITS.keys())
 
 rule all:
@@ -36,7 +35,7 @@ rule all:
 
 rule outlier:
     input:
-        sumstats=lambda wc: TRAITS[wc.trait],
+        tsv=lambda wc: TRAITS[wc.trait],
         sfs=SFS_PILE
     output:
         os.path.join(PER_TRAIT_DIR, "{trait}_outliers_rr0.tsv")
@@ -50,11 +49,11 @@ rule outlier:
         import smilenfer.statistics as sstats
         import smilenfer.simulation as sim
 
-        df      = pd.read_csv(input.sumstats, sep="\t", compression="infer")
+        df      = pd.read_csv(input.tsv, sep="\t")
         raf     = df.raf.to_numpy()
         rbeta   = df.rbeta.to_numpy()
         var_exp = df.var_exp.to_numpy()
-        n_eff_med = np.nanmedian(df["n_eff"])
+        n_eff_med = df["median_n_eff"].iloc[0]
         v_cut   = stats.chi2.isf(params.p_thresh, df=1) / n_eff_med
         mask    = var_exp > v_cut
         raf, rbeta = raf[mask], rbeta[mask]

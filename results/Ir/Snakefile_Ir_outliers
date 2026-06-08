@@ -1,0 +1,107 @@
+import os
+from glob import glob
+
+DATA_DIR        = os.path.join("..", "data", "final", "original_traits")
+SFS_PILE        = os.path.join("..", "data", "SFS_pile", "tenn_eur_pile.pkl")
+P_THRESH        = 5e-8
+N_ITERS         = 10000
+PER_TRAIT_DIR   = "per_trait"
+PER_TRAIT_RR0_DIR = "per_trait_rr0"
+
+PROCESSED_FILES = sorted(glob(os.path.join(DATA_DIR, "processed.*.snps_low_r2.tsv")))
+
+def trait_from_fname(path):
+    name = os.path.basename(path)
+    prefix = "processed."
+    suffix = ".snps_low_r2.tsv"
+    if not name.startswith(prefix) or not name.endswith(suffix):
+        raise ValueError("unexpected processed filename: {}".format(name))
+    return name[len(prefix):-len(suffix)]
+
+TRAITS = {trait_from_fname(f): f for f in PROCESSED_FILES}
+TRAIT_LIST = sorted(TRAITS.keys())
+
+rule all:
+    input:
+        expand(os.path.join(PER_TRAIT_DIR, "{trait}_outliers.tsv"), trait=TRAIT_LIST),
+        expand(os.path.join(PER_TRAIT_RR0_DIR, "{trait}_outliers_rr0.tsv"), trait=TRAIT_LIST)
+
+rule outlier:
+    input:
+        sumstats=lambda wc: TRAITS[wc.trait],
+        sfs=SFS_PILE
+    output:
+        os.path.join(PER_TRAIT_DIR, "{trait}_outliers.tsv")
+    params:
+        p_thresh=P_THRESH
+    run:
+        import pickle
+        import numpy as np
+        import pandas as pd
+        import scipy.stats as stats
+        import smilenfer.statistics as sstats
+        import smilenfer.simulation as sim
+
+        df      = pd.read_csv(input.sumstats, sep="\t", compression="infer")
+        raf     = df.raf.to_numpy()
+        rbeta   = df.rbeta.to_numpy()
+        var_exp = df.var_exp.to_numpy()
+        n_eff_med = np.nanmedian(df["n_eff"])
+        v_cut   = stats.chi2.isf(params.p_thresh, df=1) / n_eff_med
+        mask    = var_exp > v_cut
+        raf, rbeta = raf[mask], rbeta[mask]
+
+        pile = pickle.load(open(input.sfs, "rb"))
+        pile = sim.truncate_pile(pile, 1e-8)
+
+        deviations = sstats.case_deletion_deviation(
+            pile, N_ITERS, raf, rbeta, v_cut,
+            model="Ip", n_points=1000, n_x=1000
+        )
+
+        df_outliers = df[mask].copy()
+        df_outliers["median_n_eff"] = n_eff_med
+        df_outliers["deviation"] = deviations
+        df_outliers = df_outliers.sort_values("deviation", ascending=False)
+
+        df_outliers.to_csv(output[0], sep="\t", index=False)
+
+rule outlier_rr0:
+    input:
+        sumstats=lambda wc: TRAITS[wc.trait],
+        sfs=SFS_PILE
+    output:
+        os.path.join(PER_TRAIT_RR0_DIR, "{trait}_outliers_rr0.tsv")
+    params:
+        p_thresh=P_THRESH
+    run:
+        import pickle
+        import numpy as np
+        import pandas as pd
+        import scipy.stats as stats
+        import smilenfer.statistics as sstats
+        import smilenfer.simulation as sim
+
+        df      = pd.read_csv(input.sumstats, sep="\t", compression="infer")
+        raf     = df.raf.to_numpy()
+        rbeta   = df.rbeta.to_numpy()
+        var_exp = df.var_exp.to_numpy()
+        n_eff_med = np.nanmedian(df["n_eff"])
+        v_cut   = stats.chi2.isf(params.p_thresh, df=1) / n_eff_med
+        mask    = var_exp > v_cut
+        raf, rbeta = raf[mask], rbeta[mask]
+
+        pile = pickle.load(open(input.sfs, "rb"))
+        pile = sim.truncate_pile(pile, 1e-8)
+
+        deviations = sstats.case_deletion_deviation_Ir_rr0(
+            pile, N_ITERS, raf, rbeta, v_cut,
+            n_points=1000, n_x=1000
+        )
+
+        df_outliers = df[mask].copy()
+        df_outliers["median_n_eff"] = n_eff_med
+        df_outliers["deviation"] = deviations
+        df_outliers = df_outliers.sort_values("deviation", ascending=False)
+
+        df_outliers.to_csv(output[0], sep="\t", index=False)

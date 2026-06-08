@@ -5,23 +5,15 @@ SFS_PILE        = os.path.join("..", "data", "SFS_pile", "tenn_eur_pile.pkl")
 P_THRESH        = 5e-8
 N_ITERS         = 10000
 SIM_TRUNC       = 1e-8
-INPUT_DIR       = "per_trait"
 PER_TRAIT_DIR   = "per_trait_rr0"
 RESULTS_DIR     = "results_rr0"
 DROP_COUNTS     = [0, 1, 2, 5]
 
-if not os.path.isdir(INPUT_DIR):
-    raise RuntimeError("per-trait input directory missing: {}".format(INPUT_DIR))
-if not os.path.isfile(SFS_PILE):
-    raise RuntimeError("SFS pile missing: {}".format(SFS_PILE))
-
-INPUT_FILES = sorted(glob(os.path.join(INPUT_DIR, "*_outliers.tsv")))
-if not INPUT_FILES:
-    raise RuntimeError("no *_outliers.tsv files under {}".format(INPUT_DIR))
+INPUT_FILES = sorted(glob(os.path.join(PER_TRAIT_DIR, "*_outliers_rr0.tsv")))
 
 def trait_from_fname(path):
     name = os.path.basename(path)
-    suffix = "_outliers.tsv"
+    suffix = "_outliers_rr0.tsv"
     if not name.endswith(suffix):
         raise ValueError("unexpected per-trait filename: {}".format(name))
     return name[:-len(suffix)]
@@ -32,47 +24,6 @@ TRAIT_LIST = sorted(TRAITS.keys())
 rule all:
     input:
         os.path.join(RESULTS_DIR, "ir_rr0_estimates_all.csv")
-
-rule outlier:
-    input:
-        tsv=lambda wc: TRAITS[wc.trait],
-        sfs=SFS_PILE
-    output:
-        os.path.join(PER_TRAIT_DIR, "{trait}_outliers_rr0.tsv")
-    params:
-        p_thresh=P_THRESH
-    run:
-        import pickle
-        import numpy as np
-        import pandas as pd
-        import scipy.stats as stats
-        import smilenfer.statistics as sstats
-        import smilenfer.simulation as sim
-
-        df      = pd.read_csv(input.tsv, sep="\t")
-        raf     = df.raf.to_numpy()
-        rbeta   = df.rbeta.to_numpy()
-        var_exp = df.var_exp.to_numpy()
-        n_eff_med = df["median_n_eff"].iloc[0]
-        v_cut   = stats.chi2.isf(params.p_thresh, df=1) / n_eff_med
-        mask    = var_exp > v_cut
-        raf, rbeta = raf[mask], rbeta[mask]
-
-        pile = pickle.load(open(input.sfs, "rb"))
-        pile = sim.truncate_pile(pile, 1e-8)
-
-        deviations = sstats.case_deletion_deviation_Ir_rr0(
-            pile, N_ITERS, raf, rbeta, v_cut,
-            n_points=1000, n_x=1000
-        )
-
-        df_outliers = df[mask].copy()
-        df_outliers["median_n_eff"] = n_eff_med
-        df_outliers["deviation"] = deviations
-        df_outliers = df_outliers.sort_values("deviation", ascending=False)
-
-        os.makedirs(PER_TRAIT_DIR, exist_ok=True)
-        df_outliers.to_csv(output[0], sep="\t", index=False)
 
 #––– Re-fit after dropping top outliers
 rule estimate:

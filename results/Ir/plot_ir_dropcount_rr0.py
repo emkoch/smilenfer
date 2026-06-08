@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import smilenfer.plotting as splot
 import plot_ir_dropcount as base_plot
 
-RESULTS_DIR_BASE = "results"
+RESULTS_DIR_BASE = os.path.join("ir", "posterior_mean", "results")
 RESULTS_DIR_RR0 = "results_rr0"
 DROP_COUNTS = [0, 1, 2, 5]
 
@@ -38,7 +38,7 @@ def load_all():
 
 def plot_rr0_paths(rr0_df, out_path):
     xmin, xmax, ymax = base_plot.get_axis_limits(rr0_df)
-    base_plot.plot_paths_traitcolors_hists(
+    base_plot.plot_paths_traitcolors_hists_pleioonly(
         rr0_df,
         xmin,
         xmax,
@@ -221,29 +221,12 @@ def plot_r_change_correlations(merged, out_path):
 
 def main():
     splot._plot_params()
-    rr0_df, merged = load_all()
-    base_outliers = load_outlier_tables("per_trait", "_outliers")
-    rr0_outliers = load_outlier_tables("per_trait_rr0", "_outliers_rr0")
+    rr0_df, _ = load_results_generic(RESULTS_DIR_RR0, "ir_rr0_estimates_all.csv")
     plot_dir = "."
 
     plot_rr0_paths(
         rr0_df,
-        os.path.join(plot_dir, "single_trait_r_scaling_r0_outliers.pdf"),
-    )
-
-    for top_k in (20,):
-        overlap_df = overlap_summary(base_outliers, rr0_outliers, top_k=top_k)
-        if overlap_df.empty:
-            continue
-        plot_overlap_bars(
-            overlap_df,
-            os.path.join(plot_dir, f"outlier_overlap_top{top_k}.pdf"),
-            title=f"Pleiotropic stabilizing outliers vs r=0 outliers (top {top_k})",
-        )
-
-    plot_r_change_correlations(
-        merged,
-        out_path=os.path.join(plot_dir, "r_change_correlation_drop0_vs_drop5.pdf"),
+        os.path.join(plot_dir, "figure_5_rr0.pdf"),
     )
 
 

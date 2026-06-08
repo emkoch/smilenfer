@@ -56,7 +56,7 @@ rule estimate:
         v_cut = stats.chi2.isf(P_THRESH, df=1) / median_n
         mask = df["var_exp"] > v_cut
         raf = df.loc[mask, "raf"].to_numpy()
-        rbeta = df.loc[mask, "rbeta"].to_numpy()
+        rbeta = np.abs(df.loc[mask, "PosteriorMean"].to_numpy())
 
         pile = pickle.load(open(SFS_PILE, "rb"))
         pile = sim.truncate_pile(pile, SIM_TRUNC)

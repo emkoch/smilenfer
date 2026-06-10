@@ -1,6 +1,4 @@
-from dataclasses import dataclass
-from pathlib import Path
-
+import os
 import matplotlib
 import numpy as np
 import pandas as pd
@@ -43,50 +41,30 @@ PANEL_GAP_UNITS = 0.75
 MIN_TRAIT_COUNT = 40
 
 
-@dataclass
-class PanelSpec:
-    panel_id: str
-    title: str
-    primary: pd.DataFrame
-    trait_groups: dict
-    trait_group_labels: list
-    trait_names: dict
-    trait_count_map: dict
-    adjusted_n: int | None = None
-    secondary: pd.DataFrame | None = None
-    samples: pd.DataFrame | None = None
-
-
-def set_publication_style():
-    plt.rcParams.update(
-        {
-            "figure.facecolor": "white",
-            "axes.facecolor": "white",
-            "savefig.facecolor": "white",
-            "axes.edgecolor": "#222222",
-            "axes.linewidth": 0.8,
-            "axes.labelsize": 10.8,
-            "axes.titlesize": 9.5,
-            "font.family": "sans-serif",
-            "font.sans-serif": ["DejaVu Sans"],
-            "font.size": 8.5,
-            "legend.fontsize": 10.2,
-            "legend.title_fontsize": 10.8,
-            "xtick.labelsize": 11.2,
-            "ytick.labelsize": 8.8,
-            "xtick.major.width": 0.7,
-            "ytick.major.width": 0.7,
-            "xtick.major.size": 3.0,
-            "ytick.major.size": 3.0,
-            "pdf.fonttype": 42,
-            "ps.fonttype": 42,
-        }
-    )
-
-
-def darken_color(color, factor=0.75):
-    rgb = np.array(matplotlib.colors.to_rgb(color))
-    return tuple(np.clip(rgb * factor, 0, 1))
+plt.rcParams.update(
+    {
+        "figure.facecolor": "white",
+        "axes.facecolor": "white",
+        "savefig.facecolor": "white",
+        "axes.edgecolor": "#222222",
+        "axes.linewidth": 0.8,
+        "axes.labelsize": 10.8,
+        "axes.titlesize": 9.5,
+        "font.family": "sans-serif",
+        "font.sans-serif": ["DejaVu Sans"],
+        "font.size": 8.5,
+        "legend.fontsize": 10.2,
+        "legend.title_fontsize": 10.8,
+        "xtick.labelsize": 11.2,
+        "ytick.labelsize": 8.8,
+        "xtick.major.width": 0.7,
+        "ytick.major.width": 0.7,
+        "xtick.major.size": 3.0,
+        "ytick.major.size": 3.0,
+        "pdf.fonttype": 42,
+        "ps.fonttype": 42,
+    }
+)
 
 
 def stable_chi2_log10sf(x, df):
@@ -122,28 +100,6 @@ def prepare_table(df, pval):
     return table
 
 
-def nice_upper_bound(raw_max, pval):
-    if pval:
-        if raw_max <= 5:
-            return 5
-        if raw_max <= 10:
-            return 10
-        return int(np.ceil(raw_max / 5.0) * 5)
-    if raw_max <= 20:
-        return 20
-    if raw_max <= 50:
-        return 50
-    if raw_max <= 100:
-        return 100
-    if raw_max <= 200:
-        return 200
-    if raw_max <= 500:
-        return 500
-    if raw_max <= 1000:
-        return 1000
-    return int(np.ceil(raw_max / 250.0) * 250)
-
-
 def get_panel_bounds(processed_tables, pval):
     all_values = []
     for table in processed_tables:
@@ -158,111 +114,32 @@ def get_panel_bounds(processed_tables, pval):
 
     values = np.concatenate(all_values)
     if pval:
-        upper = nice_upper_bound(float(np.nanmax(values)) * 1.28, pval=True)
+        raw_max = float(np.nanmax(values)) * 1.28
+        if raw_max <= 5:
+            upper = 5
+        elif raw_max <= 10:
+            upper = 10
+        else:
+            upper = int(np.ceil(raw_max / 5.0) * 5)
         return (-0.4, upper)
 
     lower = min(-2.5, float(np.nanmin(values)) * 1.1)
-    upper = nice_upper_bound(float(np.nanmax(values)) * 1.18, pval=False)
-    return (lower, upper)
-
-
-def get_stat_mode_config(stat_mode):
-    if stat_mode == "aic":
-        return {
-            "pval": False,
-            "ylabel": r"$-\Delta \mathrm{AIC}_{\mathrm{model-neut}}$",
-            "suffix": "aic",
-        }
-    if stat_mode == "pval":
-        return {
-            "pval": True,
-            "ylabel": r"$-\log_{10}(P)$",
-            "suffix": "pval",
-        }
-    raise ValueError(f"Unknown stat mode: {stat_mode}")
-
-
-def make_group_widths(trait_groups):
-    widths = []
-    gap_indices = []
-    n_groups = len(trait_groups)
-    for group_index, traits in enumerate(trait_groups.values()):
-        widths.extend([1.0] * len(traits))
-        if group_index < n_groups - 1:
-            gap_indices.append(len(widths))
-            widths.append(GROUP_GAP_WIDTH)
-    return widths, set(gap_indices)
-
-
-def panel_width_units(spec):
-    n_traits = sum(len(group) for group in spec.trait_groups.values())
-    n_group_gaps = max(len(spec.trait_groups) - 1, 0)
-    return n_traits + GROUP_GAP_WIDTH * n_group_gaps
-
-
-def draw_reference_lines(ax, n_traits):
-    ax.axhline(0, color="#7A7A7A", linestyle=(0, (4, 2)), linewidth=0.8, zorder=1)
-    ax.axhline(-np.log10(0.05), color="#C44E52", linestyle=(0, (4, 2)), linewidth=0.8, zorder=1)
-    ax.axhline(
-        -np.log10(0.05 / n_traits),
-        color="#6F3E8B",
-        linestyle=(0, (4, 2)),
-        linewidth=0.8,
-        zorder=1,
-    )
-
-
-def style_axis(ax, label, show_ylabel, ylabel):
-    ax.set_xticks([0])
-    ax.set_xticklabels([label], rotation=55, ha="right", rotation_mode="anchor", fontsize=11.2)
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
-    ax.grid(axis="y", color="#D9D9D9", linewidth=0.5, alpha=0.65)
-    ax.grid(axis="x", visible=False)
-    if show_ylabel:
-        ax.set_ylabel(ylabel)
+    raw_max = float(np.nanmax(values)) * 1.18
+    if raw_max <= 20:
+        upper = 20
+    elif raw_max <= 50:
+        upper = 50
+    elif raw_max <= 100:
+        upper = 100
+    elif raw_max <= 200:
+        upper = 200
+    elif raw_max <= 500:
+        upper = 500
+    elif raw_max <= 1000:
+        upper = 1000
     else:
-        ax.tick_params(axis="y", labelleft=False)
-    ax.tick_params(axis="x", pad=1.5)
-
-
-def load_trait_count_table(base_dir):
-    count_path = base_dir / "figure_3_trait_counts.csv"
-    if not count_path.exists():
-        return {}
-    count_df = pd.read_csv(count_path)
-    return {
-        (row.panel_id, row.trait): f"{int(row.n)}"
-        for row in count_df.itertuples(index=False)
-    }
-
-
-def filter_panel_spec(spec, min_count):
-    trait_groups = {}
-    trait_group_labels = []
-    for group_label, (group_name, traits) in zip(spec.trait_group_labels, spec.trait_groups.items()):
-        kept = [trait for trait in traits if int(spec.trait_count_map.get(trait, 0)) >= min_count]
-        if kept:
-            trait_groups[group_name] = kept
-            trait_group_labels.append(group_label)
-
-    keep_traits = {trait for traits in trait_groups.values() for trait in traits}
-    primary = spec.primary[spec.primary["trait"].isin(keep_traits)].copy()
-    secondary = None if spec.secondary is None else spec.secondary[spec.secondary["trait"].isin(keep_traits)].copy()
-    samples = None if spec.samples is None else spec.samples[spec.samples["trait"].isin(keep_traits)].copy()
-
-    return PanelSpec(
-        panel_id=spec.panel_id,
-        title=spec.title,
-        primary=primary,
-        trait_groups=trait_groups,
-        trait_group_labels=trait_group_labels,
-        trait_names={trait: spec.trait_names[trait] for trait in keep_traits},
-        trait_count_map={trait: spec.trait_count_map[trait] for trait in keep_traits},
-        adjusted_n=spec.adjusted_n,
-        secondary=secondary,
-        samples=samples,
-    )
+        upper = int(np.ceil(raw_max / 250.0) * 250)
+    return (lower, upper)
 
 
 def draw_points(ax, row, face_alpha, edge_alpha, size, linewidth, zorder, fill=True):
@@ -271,7 +148,7 @@ def draw_points(ax, row, face_alpha, edge_alpha, size, linewidth, zorder, fill=T
         if pd.isna(value):
             continue
         style = MODEL_STYLES[model]
-        edge = darken_color(style["color"])
+        edge = tuple(np.clip(np.array(matplotlib.colors.to_rgb(style["color"])) * 0.75, 0, 1))
         face = matplotlib.colors.to_rgba(style["color"], face_alpha) if fill else "none"
         ax.scatter(
             MODEL_OFFSETS[model],
@@ -285,8 +162,17 @@ def draw_points(ax, row, face_alpha, edge_alpha, size, linewidth, zorder, fill=T
         )
 
 
-def render_panel(fig, subplot_spec, spec, y_limits, pval, ylabel, panel_show_ylabel):
-    widths, gap_indices = make_group_widths(spec.trait_groups)
+def render_panel(fig, subplot_spec, spec, y_limits, pval, ylabel, panel_show_ylabel, show_aic_thresholds):
+    widths = []
+    gap_indices = []
+    n_groups = len(spec["trait_groups"])
+    for group_index, traits in enumerate(spec["trait_groups"].values()):
+        widths.extend([1.0] * len(traits))
+        if group_index < n_groups - 1:
+            gap_indices.append(len(widths))
+            widths.append(GROUP_GAP_WIDTH)
+    gap_indices = set(gap_indices)
+
     panel_grid = GridSpecFromSubplotSpec(
         2,
         len(widths),
@@ -297,9 +183,9 @@ def render_panel(fig, subplot_spec, spec, y_limits, pval, ylabel, panel_show_yla
         wspace=0.08,
     )
 
-    primary = prepare_table(spec.primary, pval)
-    secondary = prepare_table(spec.secondary, pval) if spec.secondary is not None else None
-    samples = prepare_table(spec.samples, pval) if spec.samples is not None else None
+    primary = prepare_table(spec["primary"], pval)
+    secondary = prepare_table(spec["secondary"], pval) if spec["secondary"] is not None else None
+    samples = prepare_table(spec["samples"], pval) if spec["samples"] is not None else None
     if samples is None and "sample" in primary.columns and primary["sample"].max() > 0:
         samples = primary.loc[primary["sample"] > 0].copy()
         main_rows = primary.loc[primary["sample"] == 0].copy()
@@ -311,10 +197,10 @@ def render_panel(fig, subplot_spec, spec, y_limits, pval, ylabel, panel_show_yla
     group_bounds = []
     share_ax = None
     col = 0
-    n_panel_traits = sum(len(v) for v in spec.trait_groups.values())
-    adjusted_n = spec.adjusted_n if spec.adjusted_n is not None else n_panel_traits
+    n_panel_traits = sum(len(v) for v in spec["trait_groups"].values())
+    adjusted_n = spec["adjusted_n"] if spec["adjusted_n"] is not None else n_panel_traits
 
-    for group_label, group_traits in zip(spec.trait_group_labels, spec.trait_groups.values()):
+    for group_label, group_traits in zip(spec["trait_group_labels"], spec["trait_groups"].values()):
         first_ax = None
         last_ax = None
         for trait_index, trait in enumerate(group_traits):
@@ -330,30 +216,51 @@ def render_panel(fig, subplot_spec, spec, y_limits, pval, ylabel, panel_show_yla
             axes.append(ax)
             col += 1
 
-            label = spec.trait_names[trait]
-            style_axis(
-                ax=ax,
-                label=label,
-                show_ylabel=(panel_show_ylabel and trait_index == 0 and group_label == spec.trait_group_labels[0]),
-                ylabel=ylabel,
-            )
+            ax.set_xticks([0])
+            ax.set_xticklabels([spec["trait_names"][trait]], rotation=55, ha="right", rotation_mode="anchor", fontsize=11.2)
+            ax.spines["top"].set_visible(False)
+            ax.spines["right"].set_visible(False)
+            ax.grid(axis="y", color="#D9D9D9", linewidth=0.5, alpha=0.65)
+            ax.grid(axis="x", visible=False)
+            if panel_show_ylabel and trait_index == 0 and group_label == spec["trait_group_labels"][0]:
+                ax.set_ylabel(ylabel)
+            else:
+                ax.tick_params(axis="y", labelleft=False)
+            ax.tick_params(axis="x", pad=1.5)
             ax.set_xlim(-0.48, 0.48)
             ax.set_ylim(*y_limits)
 
             if pval:
-                draw_reference_lines(ax, adjusted_n)
+                ax.axhline(0, color="#7A7A7A", linestyle=(0, (4, 2)), linewidth=0.8, zorder=1)
+                ax.axhline(-np.log10(0.05), color="#C44E52", linestyle=(0, (4, 2)), linewidth=0.8, zorder=1)
+                ax.axhline(
+                    -np.log10(0.05 / adjusted_n),
+                    color="#6F3E8B",
+                    linestyle=(0, (4, 2)),
+                    linewidth=0.8,
+                    zorder=1,
+                )
                 ax.set_yscale("symlog", linthresh=10)
                 upper = y_limits[1]
                 tick_candidates = [2, 5, 10, 20, 50, 100, 200, 500]
                 ax.set_yticks([tick for tick in tick_candidates if tick <= upper])
             else:
                 ax.axhline(0, color="#7A7A7A", linestyle=(0, (4, 2)), linewidth=0.8, zorder=1)
+                if show_aic_thresholds:
+                    ax.axhline(chi2.isf(0.05, 1) - 2, color="#C44E52", linestyle=(0, (4, 2)), linewidth=0.8, zorder=1)
+                    ax.axhline(
+                        chi2.isf(0.05 / adjusted_n, 1) - 2,
+                        color="#6F3E8B",
+                        linestyle=(0, (4, 2)),
+                        linewidth=0.8,
+                        zorder=1,
+                    )
                 ax.set_yscale("symlog", linthresh=10)
                 ax.set_yticks([0, 2, 5, 10, 20, 50, 100, 200, 500, 1000])
 
             row = primary.loc[primary["trait"] == trait]
             if row.empty:
-                raise ValueError(f"Missing primary results for trait '{trait}' in panel {spec.panel_id}.")
+                raise ValueError(f"Missing primary results for trait '{trait}' in panel {spec['panel_id']}.")
             draw_points(ax, row.iloc[0], face_alpha=0.75, edge_alpha=1.0, size=50, linewidth=1.0, zorder=4, fill=True)
 
             if samples is not None:
@@ -384,7 +291,7 @@ def render_panel(fig, subplot_spec, spec, y_limits, pval, ylabel, panel_show_yla
                         fill=False,
                     )
 
-            count_label = spec.trait_count_map.get(trait)
+            count_label = spec["trait_count_map"].get(trait)
             if count_label is not None:
                 count_ax.text(
                     0.5,
@@ -449,18 +356,7 @@ def annotate_panel(fig, rendered_panel, panel_id, title, title_offset=0.022, gro
         )
 
 
-def add_row_count_prefix(fig, rendered_panel, text="n ="):
-    count_axes = rendered_panel.get("count_axes", [])
-    if not count_axes:
-        return
-    first_count_ax = count_axes[0]
-    pos = first_count_ax.get_position()
-    y = pos.y0 + 0.30 * pos.height
-    x = pos.x0 - 0.010
-    fig.text(x, y, text, ha="right", va="center", fontsize=11.6, color="#333333")
-
-
-def add_global_legends(legend_ax, pval):
+def add_global_legends(legend_ax, pval, show_aic_thresholds):
     legend_ax.axis("off")
 
     model_handles = []
@@ -473,7 +369,7 @@ def add_global_legends(legend_ax, pval):
                 marker=style["marker"],
                 linestyle="None",
                 markerfacecolor=matplotlib.colors.to_rgba(style["color"], 0.75),
-                markeredgecolor=darken_color(style["color"]),
+                markeredgecolor=tuple(np.clip(np.array(matplotlib.colors.to_rgb(style["color"])) * 0.75, 0, 1)),
                 markeredgewidth=0.9,
                 markersize=8.2,
                 label=style["label"],
@@ -488,6 +384,13 @@ def add_global_legends(legend_ax, pval):
             [
                 Line2D([0], [0], color="#C44E52", linestyle=(0, (4, 2)), linewidth=0.9, label=r"Nominal threshold ($P=0.05$)"),
                 Line2D([0], [0], color="#6F3E8B", linestyle=(0, (4, 2)), linewidth=0.9, label="Bonferroni threshold"),
+            ]
+        )
+    elif show_aic_thresholds:
+        threshold_handles.extend(
+            [
+                Line2D([0], [0], color="#C44E52", linestyle=(0, (4, 2)), linewidth=0.9, label=r"Nominal threshold ($P=0.05$, 1 df)"),
+                Line2D([0], [0], color="#6F3E8B", linestyle=(0, (4, 2)), linewidth=0.9, label="Bonferroni threshold (1 df)"),
             ]
         )
 
@@ -524,12 +427,17 @@ def add_global_legends(legend_ax, pval):
     legend_ax.add_artist(legend_models)
 
 
-def build_three_row_layout(fig, panels, shared_limits, pval, ylabel):
-    width_a = panel_width_units(panels[0])
-    width_b = panel_width_units(panels[1]) * 1.15
-    width_c = panel_width_units(panels[2])
-    width_d = panel_width_units(panels[3])
-    width_e = panel_width_units(panels[4])
+def build_three_row_layout(fig, panels, shared_limits, pval, ylabel, show_aic_thresholds):
+    panel_widths = []
+    for panel in panels:
+        n_traits = sum(len(group) for group in panel["trait_groups"].values())
+        n_group_gaps = max(len(panel["trait_groups"]) - 1, 0)
+        panel_widths.append(n_traits + GROUP_GAP_WIDTH * n_group_gaps)
+    width_a = panel_widths[0]
+    width_b = panel_widths[1] * 1.15
+    width_c = panel_widths[2]
+    width_d = panel_widths[3]
+    width_e = panel_widths[4]
     legend_width = 4.3
     row1_total = width_b
     row2_total = width_a + PANEL_GAP_UNITS + width_c + PANEL_GAP_UNITS + legend_width
@@ -593,7 +501,7 @@ def build_three_row_layout(fig, panels, shared_limits, pval, ylabel):
     row3_first, row3_second = content_indices(row_ratios(width_d, width_e), True)
 
     rendered = [None] * len(panels)
-    rendered[1] = render_panel(fig, row1[row1_first], panels[1], shared_limits, pval, ylabel, True)
+    rendered[1] = render_panel(fig, row1[row1_first], panels[1], shared_limits, pval, ylabel, True, show_aic_thresholds)
 
     row2_panels = GridSpecFromSubplotSpec(
         1,
@@ -602,19 +510,38 @@ def build_three_row_layout(fig, panels, shared_limits, pval, ylabel):
         width_ratios=[width_a, PANEL_GAP_UNITS, width_c],
         wspace=0.0,
     )
-    rendered[0] = render_panel(fig, row2_panels[0], panels[0], shared_limits, pval, ylabel, True)
-    rendered[2] = render_panel(fig, row2_panels[2], panels[2], shared_limits, pval, ylabel, False)
+    rendered[0] = render_panel(fig, row2_panels[0], panels[0], shared_limits, pval, ylabel, True, show_aic_thresholds)
+    rendered[2] = render_panel(fig, row2_panels[2], panels[2], shared_limits, pval, ylabel, False, show_aic_thresholds)
 
-    rendered[3] = render_panel(fig, row3[row3_first], panels[3], shared_limits, pval, ylabel, True)
-    rendered[4] = render_panel(fig, row3[row3_second], panels[4], shared_limits, pval, ylabel, False)
+    rendered[3] = render_panel(fig, row3[row3_first], panels[3], shared_limits, pval, ylabel, True, show_aic_thresholds)
+    rendered[4] = render_panel(fig, row3[row3_second], panels[4], shared_limits, pval, ylabel, False, show_aic_thresholds)
 
     legend_ax = fig.add_subplot(row2[row2_second])
     return rendered, legend_ax
 
 
-def load_panel_specs(base_dir):
-    fit_root = base_dir.parent / "all_opt_fits"
-    trait_counts = load_trait_count_table(base_dir)
+def load_panels(base_dir, wc=False):
+    fit_root = os.path.join(base_dir, "..", "all_opt_fits")
+    if wc:
+        count_df = pd.read_csv(os.path.join(base_dir, "figure_3_trait_counts_wc.csv"))
+    else:
+        count_df = pd.read_csv(os.path.join(base_dir, "figure_3_trait_counts.csv"))
+    trait_counts = {
+        (row.panel_id, row.trait): f"{int(row.n)}"
+        for row in count_df.itertuples(index=False)
+    }
+    if wc:
+        original_results = "opt_results_original_traits_eur_wc.csv"
+        bbj_results = "opt_results_high_bbj_wc.csv"
+        ukbb_results = "opt_results_ukbb_susiex_wc.csv"
+        mvp_results = "opt_results_mvp_finemapping_eur_wc.csv"
+        bbj_samples = None
+    else:
+        original_results = "opt_results_original_traits_eur_post.csv"
+        bbj_results = "opt_results_high_bbj.csv"
+        ukbb_results = "opt_results_ukbb_susiex.csv"
+        mvp_results = "opt_results_mvp_finemapping_eur.csv"
+        bbj_samples = pd.read_csv(os.path.join(fit_root, "bbj", "opt_results_random_bbj.csv"))
 
     individual_gwas_groups = {
         "Individual disease GWAS": ["bc", "cad", "ibd", "scz", "t2d"],
@@ -745,109 +672,144 @@ def load_panel_specs(base_dir):
     )
 
     panels = [
-        PanelSpec(
-            panel_id="A",
-            title="Disease GWAS",
-            primary=pd.read_csv(fit_root / "original_traits" / "opt_results_original_traits_eur_post.csv"),
-            trait_groups=individual_gwas_groups,
-            trait_group_labels=["Disease"],
-            trait_names=original_names,
-            trait_count_map={trait: trait_counts[("A", trait)] for trait in original_names if ("A", trait) in trait_counts},
-            adjusted_n=shared_ab_n,
-        ),
-        PanelSpec(
-            panel_id="B",
-            title="UKBB/FinnGen",
-            primary=pd.read_csv(fit_root / "original_traits" / "opt_results_original_traits_eur_post.csv"),
-            trait_groups=ukbb_finngen_groups,
-            trait_group_labels=["Quantitative", "Disease"],
-            trait_names=original_names,
-            trait_count_map={trait: trait_counts[("B", trait)] for trait in original_names if ("B", trait) in trait_counts},
-            adjusted_n=shared_ab_n,
-        ),
-        PanelSpec(
-            panel_id="C",
-            title="Biobank Japan",
-            primary=pd.read_csv(fit_root / "bbj" / "opt_results_high_bbj.csv"),
-            samples=pd.read_csv(fit_root / "bbj" / "opt_results_random_bbj.csv"),
-            trait_groups=bbj_groups,
-            trait_group_labels=["Quantitative", "Disease"],
-            trait_names=bbj_names,
-            trait_count_map={trait: trait_counts[("C", trait)] for trait in bbj_names if ("C", trait) in trait_counts},
-        ),
-        PanelSpec(
-            panel_id="D",
-            title="UK Biobank SuSiE-X",
-            primary=pd.read_csv(fit_root / "ukbb_finemapping" / "opt_results_ukbb_susiex.csv"),
-            trait_groups=ukbb_groups,
-            trait_group_labels=["Quantitative"],
-            trait_names=ukbb_names,
-            trait_count_map={trait: trait_counts[("D", trait)] for trait in ukbb_names if ("D", trait) in trait_counts},
-        ),
-        PanelSpec(
-            panel_id="E",
-            title="Million Veteran Program",
-            primary=pd.read_csv(fit_root / "mvp" / "opt_results_mvp_finemapping_eur.csv"),
-            trait_groups=mvp_groups,
-            trait_group_labels=["Disease"],
-            trait_names=mvp_names,
-            trait_count_map={trait: trait_counts[("E", trait)] for trait in mvp_names if ("E", trait) in trait_counts},
-        ),
+        {
+            "panel_id": "A",
+            "title": "Disease GWAS",
+            "primary": pd.read_csv(os.path.join(fit_root, "original_traits", original_results)),
+            "trait_groups": individual_gwas_groups,
+            "trait_group_labels": ["Disease"],
+            "trait_names": original_names,
+            "trait_count_map": {trait: trait_counts[("A", trait)] for trait in original_names if ("A", trait) in trait_counts},
+            "adjusted_n": shared_ab_n,
+            "secondary": None,
+            "samples": None,
+        },
+        {
+            "panel_id": "B",
+            "title": "UKBB/FinnGen",
+            "primary": pd.read_csv(os.path.join(fit_root, "original_traits", original_results)),
+            "trait_groups": ukbb_finngen_groups,
+            "trait_group_labels": ["Quantitative", "Disease"],
+            "trait_names": original_names,
+            "trait_count_map": {trait: trait_counts[("B", trait)] for trait in original_names if ("B", trait) in trait_counts},
+            "adjusted_n": shared_ab_n,
+            "secondary": None,
+            "samples": None,
+        },
+        {
+            "panel_id": "C",
+            "title": "Biobank Japan",
+            "primary": pd.read_csv(os.path.join(fit_root, "bbj", bbj_results)),
+            "trait_groups": bbj_groups,
+            "trait_group_labels": ["Quantitative", "Disease"],
+            "trait_names": bbj_names,
+            "trait_count_map": {trait: trait_counts[("C", trait)] for trait in bbj_names if ("C", trait) in trait_counts},
+            "adjusted_n": None,
+            "secondary": None,
+            "samples": bbj_samples,
+        },
+        {
+            "panel_id": "D",
+            "title": "UK Biobank SuSiE-X",
+            "primary": pd.read_csv(os.path.join(fit_root, "ukbb_finemapping", ukbb_results)),
+            "trait_groups": ukbb_groups,
+            "trait_group_labels": ["Quantitative"],
+            "trait_names": ukbb_names,
+            "trait_count_map": {trait: trait_counts[("D", trait)] for trait in ukbb_names if ("D", trait) in trait_counts},
+            "adjusted_n": None,
+            "secondary": None,
+            "samples": None,
+        },
+        {
+            "panel_id": "E",
+            "title": "Million Veteran Program",
+            "primary": pd.read_csv(os.path.join(fit_root, "mvp", mvp_results)),
+            "trait_groups": mvp_groups,
+            "trait_group_labels": ["Disease"],
+            "trait_names": mvp_names,
+            "trait_count_map": {trait: trait_counts[("E", trait)] for trait in mvp_names if ("E", trait) in trait_counts},
+            "adjusted_n": None,
+            "secondary": None,
+            "samples": None,
+        },
     ]
 
-    return [filter_panel_spec(panel, MIN_TRAIT_COUNT) for panel in panels]
+    keep_panels = []
+    for panel in panels:
+        trait_groups = {}
+        trait_group_labels = []
+        for group_label, (group_name, traits) in zip(panel["trait_group_labels"], panel["trait_groups"].items()):
+            kept = [trait for trait in traits if int(panel["trait_count_map"].get(trait, 0)) >= MIN_TRAIT_COUNT]
+            if kept:
+                trait_groups[group_name] = kept
+                trait_group_labels.append(group_label)
+
+        keep_traits = {trait for traits in trait_groups.values() for trait in traits}
+        panel["primary"] = panel["primary"][panel["primary"]["trait"].isin(keep_traits)].copy()
+        if panel["secondary"] is not None:
+            panel["secondary"] = panel["secondary"][panel["secondary"]["trait"].isin(keep_traits)].copy()
+        if panel["samples"] is not None:
+            panel["samples"] = panel["samples"][panel["samples"]["trait"].isin(keep_traits)].copy()
+        panel["trait_groups"] = trait_groups
+        panel["trait_group_labels"] = trait_group_labels
+        panel["trait_names"] = {trait: panel["trait_names"][trait] for trait in keep_traits}
+        panel["trait_count_map"] = {trait: panel["trait_count_map"][trait] for trait in keep_traits}
+        keep_panels.append(panel)
+
+    return keep_panels
 
 
-def build_figure(stat_mode):
-    set_publication_style()
-    base_dir = Path(__file__).resolve().parent
-    panels = load_panel_specs(base_dir)
-    config = get_stat_mode_config(stat_mode)
-    pval = config["pval"]
+def build_figure(stat_mode, wc=False):
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    panels = load_panels(base_dir, wc=wc)
+    pval = stat_mode == "pval"
+    if pval:
+        ylabel = r"$-\log_{10}(P)$"
+    else:
+        ylabel = r"$-\Delta \mathrm{AIC}_{\mathrm{model-neut}}$"
+    show_aic_thresholds = True
 
     processed_tables = []
     for panel in panels:
-        processed_tables.append(prepare_table(panel.primary, pval))
-        if panel.secondary is not None:
-            processed_tables.append(prepare_table(panel.secondary, pval))
-        if panel.samples is not None:
-            processed_tables.append(prepare_table(panel.samples, pval))
+        processed_tables.append(prepare_table(panel["primary"], pval))
+        if panel["secondary"] is not None:
+            processed_tables.append(prepare_table(panel["secondary"], pval))
+        if panel["samples"] is not None:
+            processed_tables.append(prepare_table(panel["samples"], pval))
     shared_limits = get_panel_bounds(processed_tables, pval=pval)
 
     fig = plt.figure(figsize=(15.9, 14.6))
-    rendered, legend_ax = build_three_row_layout(fig, panels, shared_limits, pval, config["ylabel"])
+    rendered, legend_ax = build_three_row_layout(fig, panels, shared_limits, pval, ylabel, show_aic_thresholds)
     fig.subplots_adjust(left=0.045, right=0.995, top=0.982, bottom=0.050)
     fig.canvas.draw()
     display_ids = ["B", "A", "C", "D", "E"]
-    for panel_spec, panel_render, display_id in zip(panels, rendered, display_ids):
+    for panel, panel_render, display_id in zip(panels, rendered, display_ids):
         annotate_panel(
             fig,
             panel_render,
             display_id,
-            panel_spec.title,
+            panel["title"],
             title_offset=0.020,
             group_offset=0.0075,
             center_title=True,
         )
 
-    add_row_count_prefix(fig, rendered[1])
-    add_row_count_prefix(fig, rendered[0])
-    add_row_count_prefix(fig, rendered[3])
-    add_global_legends(legend_ax, pval)
+    for rendered_panel in [rendered[1], rendered[0], rendered[3]]:
+        count_axes = rendered_panel.get("count_axes", [])
+        if count_axes:
+            pos = count_axes[0].get_position()
+            fig.text(pos.x0 - 0.010, pos.y0 + 0.30 * pos.height, "n =", ha="right", va="center", fontsize=11.6, color="#333333")
+    add_global_legends(legend_ax, pval, show_aic_thresholds)
     return fig
 
 
-def save_figure(stat_mode, output_path):
-    fig = build_figure(stat_mode)
-    fig.savefig(output_path, bbox_inches="tight")
+base_dir = os.path.dirname(os.path.abspath(__file__))
+for stat_mode, out_name, wc in [
+    ("pval", "figure_3_composite_publication_three_row_pval.pdf", False),
+    ("aic", "figure_3_composite_publication_three_row_aic.pdf", False),
+    ("pval", "figure_3_composite_publication_three_row_pval_wc.pdf", True),
+    ("aic", "figure_3_composite_publication_three_row_aic_wc.pdf", True),
+]:
+    fig = build_figure(stat_mode, wc=wc)
+    fig.savefig(os.path.join(base_dir, out_name), bbox_inches="tight")
     plt.close(fig)
-
-
-def main():
-    base_dir = Path(__file__).resolve().parent
-    save_figure("pval", base_dir / "figure_3_composite_publication_three_row_pval.pdf")
-    save_figure("aic", base_dir / "figure_3_composite_publication_three_row_aic.pdf")
-
-
-if __name__ == "__main__":
-    main()

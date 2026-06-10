@@ -1,0 +1,60 @@
+panel_id,trait,n,count_kind
+A,bc,204,retained_hits
+A,cad,59,retained_hits
+A,ibd,199,retained_hits
+A,scz,205,retained_hits
+A,t2d,247,retained_hits
+B,arthrosis,133,retained_hits
+B,asthma,98,retained_hits
+B,bmi,1078,retained_hits
+B,dbp,584,retained_hits
+B,diverticulitis,122,retained_hits
+B,fvc,957,retained_hits
+B,gallstones,87,retained_hits
+B,glaucoma,65,retained_hits
+B,grip_strength,414,retained_hits
+B,hdl,788,retained_hits
+B,height,3260,retained_hits
+B,hypothyroidism,277,retained_hits
+B,ldl,583,retained_hits
+B,malignant_neoplasms,61,retained_hits
+B,pulse_rate,606,retained_hits
+B,rbc,997,retained_hits
+B,sbp,928,retained_hits
+B,triglycerides,625,retained_hits
+B,urate,614,retained_hits
+B,uterine_fibroids,73,retained_hits
+B,varicose_veins,175,retained_hits
+B,wbc,761,retained_hits
+C,bc,8,clumped_hits
+C,bmi,86,clumped_hits
+C,cad,40,clumped_hits
+C,dbp,22,clumped_hits
+C,gallstones,11,clumped_hits
+C,hdl,37,clumped_hits
+C,height,456,clumped_hits
+C,ldl,29,clumped_hits
+C,rbc,92,clumped_hits
+C,sbp,37,clumped_hits
+C,t2d,103,clumped_hits
+C,triglycerides,28,clumped_hits
+C,uterine_fibroids,17,clumped_hits
+D,bmi,543,sampled_hits
+D,dbp,151,sampled_hits
+D,hdl,432,sampled_hits
+D,height,1198,sampled_hits
+D,ldl,159,sampled_hits
+D,sbp,265,sampled_hits
+D,triglycerides,352,sampled_hits
+D,wbc,421,sampled_hits
+E,Atrial fibrillation,98,sampled_hits
+E,Basal cell carcinoma,53,sampled_hits
+E,Cancer of prostate,103,sampled_hits
+E,Coronary atherosclerosis,78,sampled_hits
+E,Diverticulosis and diverticulitis,44,sampled_hits
+E,Glaucoma,79,sampled_hits
+E,Gout,43,sampled_hits
+E,Hyperlipidemia,71,sampled_hits
+E,Hypertension,55,sampled_hits
+E,Hypothyroidism,80,sampled_hits
+E,Type 2 diabetes,139,sampled_hits

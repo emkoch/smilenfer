@@ -1,8 +1,6 @@
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
-import matplotlib.patheffects as pe
-from matplotlib.lines import Line2D
 from scipy.stats import chi2
 
 import smilenfer.plotting as splot
@@ -23,10 +21,6 @@ matplotlib.rcParams.update(
 )
 
 DROP_COUNTS = [0, 1, 2, 5]
-
-MARKERS_BY_DROP = {0: "o", 1: "s", 2: "^", 5: "D"}
-SIZES_BY_DROP = {0: 70, 1: 50, 2: 50, 5: 80}
-ALPHAS_BY_DROP = {0: 0.95, 1: 0.7, 2: 0.7, 5: 0.95}
 
 NOMINAL_LL_THRESHOLD = chi2.ppf(0.95, 1) / 2
 R_REFERENCE_LINE = 2.0
@@ -123,10 +117,6 @@ def make_trait_color_map(traits):
     return {trait: chosen_colors[ii % len(chosen_colors)] for ii, trait in enumerate(traits)}
 
 
-def marker_code_fontsize(marker_size):
-    return max(5, min(7, (marker_size ** 0.5) * 0.25))
-
-
 def get_axis_limits(ir_fits):
     x_values = ir_fits[["x_1d", "x_pleio"]].to_numpy().ravel()
     y_values = ir_fits[["Ir_r", "Ipr_r"]].to_numpy().ravel()
@@ -199,131 +189,6 @@ def format_main_axis(ax, xmin, xmax, ymax, ylabel=None, title=None):
     if title is not None:
         ax.set_title(title, fontsize=12, pad=8)
 
-
-def add_trait_paths(ax, ir_fits, x_col, y_col, trait_colors, trait_codes, label_drop_five):
-    for trait in sorted(ir_fits["trait"].unique()):
-        trait_rows = ir_fits[ir_fits["trait"] == trait].set_index("drop_count")
-        ordered = trait_rows.reindex(DROP_COUNTS).dropna(subset=[x_col, y_col])
-        if len(ordered) < 2:
-            continue
-
-        ax.plot(
-            ordered[x_col].values,
-            ordered[y_col].values,
-            color=trait_colors[trait],
-            alpha=0.5,
-            linewidth=0.8,
-            zorder=2,
-        )
-
-        if 0 in ordered.index and 5 in ordered.index:
-            ax.annotate(
-                "",
-                xy=(ordered.loc[5, x_col], ordered.loc[5, y_col]),
-                xytext=(ordered.loc[0, x_col], ordered.loc[0, y_col]),
-                arrowprops=dict(
-                    arrowstyle="->",
-                    lw=1.0,
-                    color=trait_colors[trait],
-                    alpha=0.7,
-                ),
-                zorder=2.5,
-            )
-
-        for drop_count, row in ordered.iterrows():
-            marker = MARKERS_BY_DROP.get(drop_count, "o")
-            marker_size = SIZES_BY_DROP.get(drop_count, 50)
-            alpha_value = ALPHAS_BY_DROP.get(drop_count, 0.8)
-            edgecolor = "black" if drop_count in (0, 5) else "none"
-            linewidth = 0.4 if edgecolor != "none" else 0.0
-
-            ax.scatter(
-                row[x_col],
-                row[y_col],
-                s=marker_size,
-                marker=marker,
-                color=trait_colors[trait],
-                alpha=alpha_value,
-                edgecolor=edgecolor,
-                linewidth=linewidth,
-                zorder=3,
-            )
-
-            if label_drop_five and drop_count == 5:
-                ax.text(
-                    row[x_col],
-                    row[y_col],
-                    trait_codes[trait],
-                    ha="center",
-                    va="center",
-                    fontsize=marker_code_fontsize(marker_size),
-                    fontweight="bold",
-                    color="white",
-                    zorder=4,
-                    path_effects=[pe.withStroke(linewidth=1.1, foreground="black")],
-                )
-
-
-def add_drop_count_legend(ax, location):
-    handles = []
-    for drop_count in DROP_COUNTS:
-        marker = MARKERS_BY_DROP.get(drop_count, "o")
-        marker_size = SIZES_BY_DROP.get(drop_count, 50)
-        edgecolor = "black" if drop_count in (0, 5) else "none"
-        handles.append(
-            Line2D(
-                [],
-                [],
-                marker=marker,
-                linestyle="",
-                markersize=max(4, (marker_size ** 0.5) / 2.0),
-                markerfacecolor="0.7",
-                markeredgecolor=edgecolor,
-                label=f"{drop_count} loci",
-            )
-        )
-    legend = ax.legend(
-        handles=handles,
-        title="Outliers dropped",
-        loc=location,
-        frameon=False,
-        fontsize=8,
-        title_fontsize=9,
-    )
-    ax.add_artist(legend)
-
-
-def add_trait_legend(ax, traits, trait_colors):
-    ax.axis("off")
-    ncol = 3 if len(traits) > 20 else 2
-    handles = [
-        Line2D(
-            [],
-            [],
-            color=trait_colors[trait],
-            linestyle="-",
-            linewidth=2.0,
-            marker="s",
-            markersize=6,
-            markerfacecolor=trait_colors[trait],
-            markeredgecolor="none",
-            label=f"{spost.original_trait_names.get(trait, trait)} ({make_trait_code(trait)})",
-        )
-        for trait in traits
-    ]
-    ax.legend(
-        handles=handles,
-        title="Traits",
-        loc="upper left",
-        bbox_to_anchor=(-0.1, 1.2),
-        frameon=False,
-        fontsize=7,
-        title_fontsize=9,
-        ncol=ncol,
-        labelspacing=0.7,
-    )
-
-
 def plot_r_histogram(ax, ir_fits, r_col):
     r_0 = ir_fits.loc[ir_fits["drop_count"] == 0, r_col].to_numpy()
     r_5 = ir_fits.loc[ir_fits["drop_count"] == 5, r_col].to_numpy()
@@ -370,99 +235,3 @@ def plot_r_histogram(ax, ir_fits, r_col):
     max_count = max(np.max(n_0) if len(n_0) else 0, np.max(n_5) if len(n_5) else 0)
     ymax = max_count * 1.2 if max_count > 0 else 1.0
     ax.set_ylim(0, ymax)
-
-
-def plot_paths_traitcolors_hists(ir_fits, xmin, xmax, ymax, out_path):
-    traits = sorted(ir_fits["trait"].unique())
-    trait_codes = {trait: make_trait_code(trait) for trait in traits}
-    trait_colors = make_trait_color_map(traits)
-
-    fig = plt.figure(figsize=(10.8, 5.2))
-    outer = fig.add_gridspec(1, 2, width_ratios=[3.6, 3.4])
-    ax_scatter = fig.add_subplot(outer[0, 0])
-    right_gs = outer[0, 1].subgridspec(3, 1, height_ratios=[0.8, 0.15, 1.15])
-    ax_legend = fig.add_subplot(right_gs[0, 0])
-    ax_hist0 = fig.add_subplot(right_gs[1, 0])
-    ax_hist5 = fig.add_subplot(right_gs[2, 0])
-
-    add_trait_paths(ax_scatter, ir_fits, "x_1d", "Ir_r", trait_colors, trait_codes, label_drop_five=True)
-    format_main_axis(
-        ax_scatter,
-        xmin,
-        xmax,
-        ymax,
-        ylabel=r"$\hat{r}$ (effect size / selection scaling: $s=|\beta|^r$)",
-        title="Single-trait stabilizing",
-    )
-
-    add_drop_count_legend(ax_scatter, "upper right")
-    add_trait_legend(ax_legend, traits, trait_colors)
-
-    ax_hist0.axis("off")
-    plot_r_histogram(ax_hist5, ir_fits, "Ir_r")
-
-    ax_scatter.text(-0.08, 1.02, "A", transform=ax_scatter.transAxes, fontsize=14, fontweight="bold", ha="right", va="bottom")
-    ax_hist5.text(-0.12, 1.02, "B", transform=ax_hist5.transAxes, fontsize=14, fontweight="bold", ha="right", va="bottom")
-
-    fig.tight_layout(rect=[0.01, 0.05, 0.98, 1])
-    for ax in (ax_hist0, ax_hist5):
-        pos = ax.get_position()
-        ax.set_position([pos.x0, pos.y0 - 0.02, pos.width, pos.height])
-
-    pos = ax_scatter.get_position()
-    fig.text(
-        pos.x0 + pos.width / 2,
-        max(0.01, pos.y0 - 0.08),
-        r"Log-likelihood difference ($|\beta|^r$ model − standard $|\beta|^2$)",
-        ha="center",
-        fontsize=12,
-    )
-    fig.savefig(out_path, bbox_inches="tight")
-
-
-def plot_paths_traitcolors_hists_pleioonly(ir_fits, xmin, xmax, ymax, out_path):
-    traits = sorted(ir_fits["trait"].unique())
-    trait_codes = {trait: make_trait_code(trait) for trait in traits}
-    trait_colors = make_trait_color_map(traits)
-
-    fig = plt.figure(figsize=(10.8, 5.2))
-    outer = fig.add_gridspec(1, 2, width_ratios=[3.6, 3.4])
-    ax_scatter = fig.add_subplot(outer[0, 0])
-    right_gs = outer[0, 1].subgridspec(3, 1, height_ratios=[0.8, 0.15, 1.15])
-    ax_legend = fig.add_subplot(right_gs[0, 0])
-    ax_hist0 = fig.add_subplot(right_gs[1, 0])
-    ax_hist5 = fig.add_subplot(right_gs[2, 0])
-
-    add_trait_paths(ax_scatter, ir_fits, "x_pleio", "Ipr_r", trait_colors, trait_codes, label_drop_five=True)
-    format_main_axis(
-        ax_scatter,
-        xmin,
-        xmax,
-        ymax,
-        ylabel=r"$\hat{r}$ (effect size versus $s$ scaling: $|\beta|^r$)",
-        title="Pleiotropic stabilizing",
-    )
-
-    add_drop_count_legend(ax_scatter, "upper right")
-    add_trait_legend(ax_legend, traits, trait_colors)
-
-    ax_hist0.axis("off")
-    plot_r_histogram(ax_hist5, ir_fits, "Ipr_r")
-
-    ax_scatter.text(-0.08, 1.02, "A", transform=ax_scatter.transAxes, fontsize=14, fontweight="bold", ha="right", va="bottom")
-    ax_hist5.text(-0.12, 1.02, "B", transform=ax_hist5.transAxes, fontsize=14, fontweight="bold", ha="right", va="bottom")
-
-    fig.tight_layout(rect=[0.01, 0.05, 0.98, 1])
-    for ax in (ax_hist0, ax_hist5):
-        pos = ax.get_position()
-        ax.set_position([pos.x0, pos.y0 - 0.02, pos.width, pos.height])
-
-    pos = ax_scatter.get_position()
-    fig.text(
-        pos.x0 + pos.width / 2,
-        max(0.01, pos.y0 - 0.08),
-        r"Log-likelihood difference ($|\beta|^r$ model − standard $|\beta|^2$)",
-        ha="center",
-        fontsize=12,
-    )
-    fig.savefig(out_path, bbox_inches="tight")

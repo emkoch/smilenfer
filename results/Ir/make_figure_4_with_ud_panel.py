@@ -10,7 +10,6 @@ import matplotlib.pyplot as plt
 import matplotlib.patheffects as pe
 from matplotlib.lines import Line2D
 
-import smilenfer.plotting as splot
 import plot_ir_dropcount as ir_plot
 
 
@@ -263,20 +262,169 @@ def make_figure(ud_input, ir_input, output):
     plt.close(fig)
 
 
+def make_ir_figure(ir_input, x_col, y_col, hist_col, title, ylabel, output):
+    ir_fits = pd.read_csv(ir_input)
+    ir_fits = ir_fits[ir_fits["drop_count"].isin(ir_plot.DROP_COUNTS)].copy()
+    ir_fits["x_1d"] = ir_fits["Ir_LL"] - ir_fits["I2_LL"]
+    ir_fits["x_pleio"] = ir_fits["Ipr_LL"] - ir_fits["Ip_LL"]
+    ir_panel = ir_fits[ir_fits["drop_count"].isin([0, 5])].copy()
+
+    traits = sorted(ir_fits["trait"].unique())
+    trait_codes = {trait: ir_plot.make_trait_code(trait) for trait in traits}
+    trait_colors = ir_plot.make_trait_color_map(traits)
+    ir_xmin, ir_xmax, ir_ymax = ir_plot.get_axis_limits(ir_panel)
+
+    fig = plt.figure(figsize=(10.8, 5.2))
+    outer = fig.add_gridspec(1, 2, width_ratios=[3.6, 3.4])
+    ax_scatter = fig.add_subplot(outer[0, 0])
+    right_gs = outer[0, 1].subgridspec(3, 1, height_ratios=[0.78, 0.12, 1.10])
+    ax_legend = fig.add_subplot(right_gs[0, 0])
+    ax_hist_pad = fig.add_subplot(right_gs[1, 0])
+    ax_hist = fig.add_subplot(right_gs[2, 0])
+
+    for trait in sorted(ir_panel["trait"].unique()):
+        trait_rows = ir_panel[ir_panel["trait"] == trait].set_index("drop_count")
+        ordered = trait_rows.reindex([0, 5]).dropna(subset=[x_col, y_col])
+        if len(ordered) < 2:
+            continue
+        ax_scatter.plot(
+            ordered[x_col].values,
+            ordered[y_col].values,
+            color=trait_colors[trait],
+            alpha=0.5,
+            linewidth=0.8,
+            zorder=2,
+        )
+        ax_scatter.annotate(
+            "",
+            xy=(ordered.loc[5, x_col], ordered.loc[5, y_col]),
+            xytext=(ordered.loc[0, x_col], ordered.loc[0, y_col]),
+            arrowprops=dict(arrowstyle="->", lw=1.0, color=trait_colors[trait], alpha=0.7),
+            zorder=2.5,
+        )
+        for drop_count, row in ordered.iterrows():
+            marker = "o" if drop_count == 0 else "D"
+            marker_size = 120 if drop_count == 0 else 92
+            alpha_value = 0.98 if drop_count == 0 else 0.82
+            ax_scatter.scatter(
+                row[x_col],
+                row[y_col],
+                s=marker_size,
+                marker=marker,
+                color=trait_colors[trait],
+                alpha=alpha_value,
+                edgecolor="black",
+                linewidth=0.4,
+                zorder=3,
+            )
+
+    for _, row in ir_panel[ir_panel["drop_count"] == 0].iterrows():
+        ax_scatter.text(
+            row[x_col],
+            row[y_col],
+            trait_codes[row["trait"]],
+            ha="center",
+            va="center",
+            fontsize=7.8,
+            fontweight="bold",
+            color="white",
+            zorder=4.2,
+            path_effects=[pe.withStroke(linewidth=1.1, foreground="black")],
+        )
+
+    ir_plot.format_main_axis(
+        ax_scatter,
+        ir_xmin,
+        ir_xmax,
+        ir_ymax,
+        ylabel=ylabel,
+        title=title,
+    )
+    handles = [
+        Line2D([], [], marker="o", linestyle="", markersize=5.5, markerfacecolor="0.7", markeredgecolor="black", label="0 loci"),
+        Line2D([], [], marker="D", linestyle="", markersize=5.0, markerfacecolor="0.7", markeredgecolor="black", label="5 loci"),
+    ]
+    legend = ax_scatter.legend(
+        handles=handles,
+        title="Outliers dropped",
+        loc="upper right",
+        frameon=False,
+        fontsize=8,
+        title_fontsize=9,
+    )
+    ax_scatter.add_artist(legend)
+
+    ax_legend.axis("off")
+    handles = []
+    for trait in traits:
+        trait_name = ir_plot.PROFESSIONAL_TRAIT_NAMES.get(trait, trait)
+        handles.append(
+            Line2D(
+                [],
+                [],
+                color=trait_colors[trait],
+                linestyle="-",
+                linewidth=2.0,
+                marker="s",
+                markersize=6,
+                markerfacecolor=trait_colors[trait],
+                markeredgecolor="none",
+                label=f"{trait_name} ({trait_codes[trait]})",
+            )
+        )
+    ax_legend.legend(
+        handles=handles,
+        title="Traits",
+        loc="upper left",
+        bbox_to_anchor=(-0.1, 1.2),
+        frameon=False,
+        fontsize=7,
+        title_fontsize=9,
+        ncol=3 if len(traits) > 20 else 2,
+        labelspacing=0.7,
+    )
+
+    ax_hist_pad.axis("off")
+    ir_plot.plot_r_histogram(ax_hist, ir_fits, hist_col)
+
+    ax_scatter.text(-0.08, 1.02, "A", transform=ax_scatter.transAxes, fontsize=14, fontweight="bold", ha="right", va="bottom")
+    ax_hist.text(-0.12, 1.02, "B", transform=ax_hist.transAxes, fontsize=14, fontweight="bold", ha="right", va="bottom")
+    fig.tight_layout(rect=[0.01, 0.05, 0.98, 1])
+    for ax in (ax_hist_pad, ax_hist):
+        pos = ax.get_position()
+        ax.set_position([pos.x0, pos.y0 - 0.02, pos.width, pos.height])
+
+    pos = ax_scatter.get_position()
+    fig.text(
+        pos.x0 + pos.width / 2,
+        max(0.01, pos.y0 - 0.08),
+        r"Log-likelihood difference ($|\beta|^r$ model − standard $|\beta|^2$)",
+        ha="center",
+        fontsize=12,
+    )
+
+    fig.savefig(output, bbox_inches="tight")
+    plt.close(fig)
+
+
 for ud_input, ir_input, output in FIGURE_INPUTS:
     make_figure(ud_input, ir_input, output)
 
-ir_fits = pd.read_csv(SINGLE_TRAIT_IR_INPUT)
-ir_fits = ir_fits[ir_fits["drop_count"].isin(ir_plot.DROP_COUNTS)].copy()
-ir_fits["x_1d"] = ir_fits["Ir_LL"] - ir_fits["I2_LL"]
-ir_fits["x_pleio"] = ir_fits["Ipr_LL"] - ir_fits["Ip_LL"]
-xmin, xmax, ymax = ir_plot.get_axis_limits(ir_fits)
-ir_plot.plot_paths_traitcolors_hists(ir_fits, xmin, xmax, ymax, SINGLE_TRAIT_IR_OUTPUT)
-
-rr0_fits = pd.read_csv(RR0_IR_INPUT)
-rr0_fits = rr0_fits[rr0_fits["drop_count"].isin(ir_plot.DROP_COUNTS)].copy()
-rr0_fits["x_1d"] = rr0_fits["Ir_LL"] - rr0_fits["I2_LL"]
-rr0_fits["x_pleio"] = rr0_fits["Ipr_LL"] - rr0_fits["Ip_LL"]
-xmin, xmax, ymax = ir_plot.get_axis_limits(rr0_fits)
-splot._plot_params()
-ir_plot.plot_paths_traitcolors_hists_pleioonly(rr0_fits, xmin, xmax, ymax, RR0_IR_OUTPUT)
+make_ir_figure(
+    SINGLE_TRAIT_IR_INPUT,
+    "x_1d",
+    "Ir_r",
+    "Ir_r",
+    "Effect-size scaling test (single-trait)",
+    r"$\hat{r}$ (effect size versus $s$ scaling: $|\beta|^r$)",
+    SINGLE_TRAIT_IR_OUTPUT,
+)
+make_ir_figure(
+    RR0_IR_INPUT,
+    "x_pleio",
+    "Ipr_r",
+    "Ipr_r",
+    "Effect-size scaling test (pleiotropic)",
+    r"$\hat{r}$ (effect size versus $s$ scaling: $|\beta|^r$)",
+    RR0_IR_OUTPUT,
+)

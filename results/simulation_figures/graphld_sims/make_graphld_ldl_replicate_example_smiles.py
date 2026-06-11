@@ -18,7 +18,6 @@ SELECTED_DATA_PATH = os.path.join(REPLICATE_DIR, "simulated_ldl_replicate_seed_2
 NEUTRAL_DATA_PATH = os.path.join(REPLICATE_DIR, "simulated_neutral_ldl_replicate_seed_30260521_loci.tsv")
 
 OUT_PDF = os.path.join(SCRIPT_DIR, "graphld_ldl_replicate_example_seed_20260521_smiles.pdf")
-OUT_TSV = os.path.join(SCRIPT_DIR, "graphld_ldl_replicate_example_seed_20260521_smiles_counts.tsv")
 
 MIN_X = 0.01
 P_THRESH = 5e-8
@@ -167,11 +166,6 @@ def load_sets(data_path):
 def main():
     selected_panel_data = load_sets(SELECTED_DATA_PATH)
     neutral_panel_data = load_sets(NEUTRAL_DATA_PATH)
-    count_rows = []
-    for condition, panel_data in [("selected", selected_panel_data), ("neutral", neutral_panel_data)]:
-        count_rows.extend({"condition": condition, "dataset": key, "n": len(panel_data[key][0])} for key in ORDER)
-    count_df = pd.DataFrame(count_rows)
-    count_df.to_csv(OUT_TSV, sep="\t", index=False)
 
     all_beta = []
     all_v_cut = []
@@ -230,7 +224,6 @@ def main():
 
     print("Wrote:")
     print(" -", OUT_PDF)
-    print(" -", OUT_TSV)
 
 
 if __name__ == "__main__":

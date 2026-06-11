@@ -10,7 +10,7 @@ conda activate smilenfer
 
 # We will be using breast cancer as the example trait.
 
-# First it is downloaded and reformated, as in download_and_reformat_gwas.sh
+# First it is downloaded and reformatted, as in download_and_reformat_gwas.sh
 wget http://ftp.ebi.ac.uk/pub/databases/gwas/summary_statistics/GCST004001-GCST005000/GCST004988/harmonised/29059683-GCST004988-EFO_0000305.h.tsv.gz
 mv 29059683-GCST004988-EFO_0000305.h.tsv.gz michailidou_2017.bc.b37.tsv.gz
 
@@ -56,7 +56,7 @@ zcat $file | awk 'NR % 5 == 1' | gzip > $out
 
 # Now we run the R script that performs adaptive shrinkage (ash)
 # Depending on the number of significant points in the GWAS, this should take from 10 minutes to 1 hour
-Rscript test.ashr.R --phen $pheno
+Rscript gw_ashr.R --phen $pheno
 
 # And then perform a clumping based on distance
 # This should take under 5 minutes
@@ -67,7 +67,7 @@ Rscript gw_clumping.R --phen $pheno
 
 # The LD filtering and model fitting can be run with
 snakemake \
-    --snakefile ../Snakefile_trait_fits_simple \
+    --snakefile Snakefile_trait_fits_simple \
     --cores 1 \
     --configfile test_run.yml
 # Given 2Gb or ram, this process take up to six hours, depending on the number of genome-wide significant associations.

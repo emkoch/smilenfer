@@ -1,5 +1,4 @@
 import numpy as np
-import pandas as pd
 import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.patheffects as pe
@@ -29,25 +28,8 @@ MARKERS_BY_DROP = {0: "o", 1: "s", 2: "^", 5: "D"}
 SIZES_BY_DROP = {0: 70, 1: 50, 2: 50, 5: 80}
 ALPHAS_BY_DROP = {0: 0.95, 1: 0.7, 2: 0.7, 5: 0.95}
 
-DOF_EXTRA_R = 1
-NOMINAL_LL_THRESHOLD = chi2.ppf(0.95, DOF_EXTRA_R) / 2
+NOMINAL_LL_THRESHOLD = chi2.ppf(0.95, 1) / 2
 R_REFERENCE_LINE = 2.0
-
-TRAIT_GROUPS = {
-    # Edit manually if a grouped color scheme is needed in comparison plots.
-    # "bmi": "anthropometric",
-    # "height": "anthropometric",
-    # "hdl": "lipids",
-    # "ldl": "lipids",
-}
-
-GROUP_COLORS = {
-    "anthropometric": "tab:blue",
-    "lipids": "tab:orange",
-    "blood": "tab:green",
-    "autoimmune": "tab:red",
-    "other": "0.5",
-}
 
 PROFESSIONAL_TRAIT_NAMES = spost.original_trait_names
 TRAIT_CODES = {
@@ -143,11 +125,6 @@ def make_trait_color_map(traits):
 
 def marker_code_fontsize(marker_size):
     return max(5, min(7, (marker_size ** 0.5) * 0.25))
-
-
-def get_trait_group_color(trait):
-    trait_group = TRAIT_GROUPS.get(trait, "other")
-    return GROUP_COLORS.get(trait_group, "0.5")
 
 
 def get_axis_limits(ir_fits):

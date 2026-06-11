@@ -1,4 +1,3 @@
-import os
 import numpy as np
 import pandas as pd
 import matplotlib
@@ -24,8 +23,6 @@ matplotlib.rcParams.update(
     }
 )
 
-RESULTS_DIR = "results"
-RESULTS_FILE = "ir_estimates_all.csv"
 DROP_COUNTS = [0, 1, 2, 5]
 
 MARKERS_BY_DROP = {0: "o", 1: "s", 2: "^", 5: "D"}
@@ -151,19 +148,6 @@ def marker_code_fontsize(marker_size):
 def get_trait_group_color(trait):
     trait_group = TRAIT_GROUPS.get(trait, "other")
     return GROUP_COLORS.get(trait_group, "0.5")
-
-
-def load_results():
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    results_path = os.path.join(script_dir, RESULTS_DIR, RESULTS_FILE)
-    if not os.path.isfile(results_path):
-        raise FileNotFoundError(f"Missing results: {results_path}")
-
-    ir_fits = pd.read_csv(results_path)
-    ir_fits = ir_fits[ir_fits["drop_count"].isin(DROP_COUNTS)].copy()
-    ir_fits["x_1d"] = ir_fits["Ir_LL"] - ir_fits["I2_LL"]
-    ir_fits["x_pleio"] = ir_fits["Ipr_LL"] - ir_fits["Ip_LL"]
-    return ir_fits
 
 
 def get_axis_limits(ir_fits):
@@ -505,27 +489,3 @@ def plot_paths_traitcolors_hists_pleioonly(ir_fits, xmin, xmax, ymax, out_path):
         fontsize=12,
     )
     fig.savefig(out_path, bbox_inches="tight")
-
-
-def main():
-    ir_fits = load_results()
-    xmin, xmax, ymax = get_axis_limits(ir_fits)
-
-    plot_paths_traitcolors_hists(
-        ir_fits,
-        xmin,
-        xmax,
-        ymax,
-        "single_trait_r_scaling_pleiotropic_outliers.pdf",
-    )
-    plot_paths_traitcolors_hists_pleioonly(
-        ir_fits,
-        xmin,
-        xmax,
-        ymax,
-        "figure_5.pdf",
-    )
-
-
-if __name__ == "__main__":
-    main()

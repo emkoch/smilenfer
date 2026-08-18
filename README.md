@@ -14,3 +14,4 @@ Snakemake pipelines used for model fits and simulations. After installing the pa
 #### More information on requirements and runtime can be found in `example_trait/example_trait_analysis.sh`
 
 Tested on Ubuntu 24.04.4 LTS; exact dependency versions are listed in `smilenfer_versions.yml`.
+No non-standard hardware is required.

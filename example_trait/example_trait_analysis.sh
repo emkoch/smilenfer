@@ -1,3 +1,5 @@
+# Legacy example for the grid-based fitting workflow used in the previous submission.
+# The current production-fitting demo is documented in the repository README.
 # To run the code, load the conda environment stored in smilenfer.yml
 # The installation of conda is described in https://docs.conda.io/projects/conda/en/latest/user-guide/install/index.html
 # The environment will have to be installed by running the following command (but only the first time)

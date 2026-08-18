@@ -5,24 +5,43 @@ Inference of simple selection models from the distribution of genetic associatio
 ### gwas_processing
 Code for downloading and processing GWAS summary statistics.
 ### results
-Processed GWAS summary statistics, model fits, simulation output, and scripts for generating figures.
+Processed GWAS summary statistics, current model-fitting workflows, model fits, simulation output, and scripts for generating figures. Current production model fitting is under `results/all_opt_fits`.
 ### smilenfer
-Main code used for analyses, simulations, and plotting. This is organized as a python package and can be installed by first creating a conda environment with the necessary dependencies `conda env create -f smilenfer.yml`. After activating the environment with `conda activate smilenfer` run `install.sh`. 
+Main code used for analyses, simulations, and plotting, organized as a Python package.
 ### snakemake
-Snakemake pipelines used for model fits and simulations. After installing the package, this is how model fits are actually performed.
+Legacy workflows used for the previous submission and retained for reproducibility of earlier grid-based fitting, simulation, and SFS-generation steps. These are not the current production model-fitting workflows.
 
-#### More information on requirements and runtime can be found in `example_trait/example_trait_analysis.sh`
+## System requirements
 
 Tested on Ubuntu 24.04.4 LTS; exact dependency versions are listed in `smilenfer_versions.yml`.
 No non-standard hardware is required.
 
+## Installation
+
+Create and activate the Conda environment, then install the package:
+
+```bash
+conda env create -f smilenfer.yml
+conda activate smilenfer
+bash install.sh
+```
+
+Typical installation takes up to one hour.
+
 ## Demo
 
-From `snakemake/test_run`, run `bash test_run.sh`. The primary expected output is `snakemake/test_run/output/ML_all_flat_5e-08_new.csv`; the breast-cancer results should match those in `results/data/ML/SIMPLE_ALL_TRAITS_NOFILTER_GENOMEWIDE/ML_all_flat_5e-08_new.csv`. Runtime is up to six hours on one core with 2 GB RAM.
+The breast-cancer example uses the same fitting rule as the current production analysis. From the repository root, run:
+
+```bash
+cd results/all_opt_fits/original_traits
+snakemake --snakefile orignal_opt_fits.smk --cores 1 bc_standard_fits_post.pkl
+```
+
+The expected outputs are `bc_standard_fits_raw.pkl` and `bc_standard_fits_post.pkl`. The posterior-mean fit should match the `bc` row in `opt_results_original_traits_eur_post.csv`. Runtime is approximately two minutes on a normal desktop computer.
 
 ## Instructions for use
 
-To analyze another trait, provide a tab-separated input file in the format of `results/data/clumped_ash/clumped.genome_wide_ash.bc.max_r2.tsv`, edit `data_dir`, `out_dir`, `trait_files`, `trait_types`, and `traits` in a copy of `snakemake/test_run/test_run.yml`, and run Snakemake as in `snakemake/test_run/test_run.sh`.
+To analyze another trait, prepare `results/data/final/original_traits/processed.<trait>.snps_low_r2.tsv` in the same format as the included breast-cancer file, add the trait name to `TRAITS` in `results/all_opt_fits/original_traits/orignal_opt_fits.smk`, and run the corresponding `<trait>_standard_fits_post.pkl` target as above.
 
 ## License and repository
 
